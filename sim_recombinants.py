@@ -5,35 +5,39 @@
 #	2. a break point will be created uniformly and interchange chromosomal segments between the maternal and paternal chromosome #
 #	3. repeat step 1 and 2 until all the chromosome pairs being processed #
 
-import os, sys
-import glob
 import re
 import random
-import string
 import math
+from argparse import ArgumentParser
+from os import makedirs
+from os.path import exists, join, dirname, realpath
+from sys import exit, stdout, stderr
 
-def read_genome(haploid_genome_file, which_copy) :
-	haploid_handle = open(haploid_genome_file, 'r')
+def read_genome(seq_file, which_parent) :
+	"""
+	read each of the parental genomes
+	"""
+	fSEQ = open(seq_file, 'r')
 	chr_id, chr_seq = "", ""
-	num_chr = 0
-	haploid_chr_dict = {}
-	for line in haploid_handle :
+	nchr = 0
+	chr_dict = {}
+	for line in fSEQ :
 		if line.startswith('>') :
 			if chr_seq != "" :
-				haploid_chr_dict[chr_id] = chr_seq
-				num_chr += 1
+				chr_dict[chr_id] = chr_seq
+				nchr += 1
 				chr_seq = ""
 			chr_id = re.split(" ", line.strip())[0][1:]
-			header = ">" + chr_id + "|%s" %(which_copy)
+			header = ">" + chr_id + "|%s" %(which_parent)
 		else :
 			chr_seq += line.strip()
 	# last chromosome sequence #
 	if chr_seq != "" :
-		haploid_chr_dict[chr_id] = chr_seq
-		num_chr += 1
-	haploid_handle.close()
+		chr_dict[chr_id] = chr_seq
+		nchr += 1
+	fSEQ.close()
 
-	return haploid_chr_dict, num_chr
+	return chr_dict, nchr
 
 def outputter(new_chr_seq, m_or_p, chr_id, breakpoints, out_handle) :
 	tmp_breakpoints = ""
@@ -64,7 +68,6 @@ def make_gametes(chr_seq_1, chr_seq_2, num_recomb_per_chr) :
 	# chr_seq_1 could be either maternal or paternal copy, so does chr_seq_2. It depends on how the function being called #
 	# breakpoints will be always made on the chr_seq_1 #
 	breakpoints = get_breakpoints(num_recomb_per_chr, len(chr_seq_1), chr_seq_1)
-	print breakpoints
 	new_chr_seq = ""
 	i = 0
 	while i <= len(breakpoints) :
@@ -83,27 +86,30 @@ def make_gametes(chr_seq_1, chr_seq_2, num_recomb_per_chr) :
 		i += 1
 	new_chr_seq = new_chr_seq.upper()
 
+	"""
+		DEBUG purpose
+	"""
 	# Checking if the recombined sequences are in the places as expected #
-	if new_chr_seq[breakpoints[0]-100:breakpoints[0]] == chr_seq_1[breakpoints[0]-100:breakpoints[0]].upper() :
-		print "sequence to the first breakpoint is right"
-	else :
-		print "sequence to the first breakpoint is not right"
-		print new_chr_seq[breakpoints[0]-5:breakpoints[0]]
-		print chr_seq_1[breakpoints[0]-5:breakpoints[0]]
-		sys.exit()
-	if new_chr_seq[breakpoints[0]:breakpoints[1]] == chr_seq_2[breakpoints[0]:breakpoints[1]].upper() :
-		print "sequence from the frist to the second breakpoint is right"
-	else :
-		print "sequence from the first to the second breakpoint is not right"
-		print new_chr_seq[breakpoints[1]-5:breakpoints[1]]
-		print chr_seq_2[breakpoints[1]-5:breakpoints[1]]
-		sys.exit()
-	if new_chr_seq[breakpoints[1]+1:len(new_chr_seq)] == chr_seq_1[breakpoints[1]+1:len(new_chr_seq)].upper() :
-		print "sequence from the second breakpoint to the end of the sequence is right"
-	else :
-		print "sequence from the second breakpoint to the end of the sequence is right"
-		#print new_chr_seq[breakpoints[1]+1:len(new_chr_seq)]
-		#print chr_seq_1[breakpoints[1]+1:len(new_chr_seq)]
+	#if new_chr_seq[breakpoints[0]-100:breakpoints[0]] == chr_seq_1[breakpoints[0]-100:breakpoints[0]].upper() :
+	#	print "sequence to the first breakpoint is right"
+	#else :
+	#	print "sequence to the first breakpoint is not right"
+	#	print new_chr_seq[breakpoints[0]-5:breakpoints[0]]
+	#	print chr_seq_1[breakpoints[0]-5:breakpoints[0]]
+	#	sys.exit()
+	#if new_chr_seq[breakpoints[0]:breakpoints[1]] == chr_seq_2[breakpoints[0]:breakpoints[1]].upper() :
+	#	print "sequence from the frist to the second breakpoint is right"
+	#else :
+	#	print "sequence from the first to the second breakpoint is not right"
+	#	print new_chr_seq[breakpoints[1]-5:breakpoints[1]]
+	#	print chr_seq_2[breakpoints[1]-5:breakpoints[1]]
+	#	sys.exit()
+	#if new_chr_seq[breakpoints[1]+1:len(new_chr_seq)] == chr_seq_1[breakpoints[1]+1:len(new_chr_seq)].upper() :
+	#	print "sequence from the second breakpoint to the end of the sequence is right"
+	#else :
+	#	print "sequence from the second breakpoint to the end of the sequence is right"
+	#	print new_chr_seq[breakpoints[1]+1:len(new_chr_seq)]
+	#	print chr_seq_1[breakpoints[1]+1:len(new_chr_seq)]
 	return new_chr_seq, breakpoints
 
 # get the breakpoints #
@@ -114,7 +120,6 @@ def get_breakpoints(num_recomb_per_chr, len_chr_seq, chr_seq) :
 	for j in range(num_recomb_per_chr) :
 		while True :
 			which_pos = random.randint(0, len_chr_seq - 1)				# the position of the breakpoint #
-			#if len_chr_seq - which_pos >= len_to_ends and which_pos >= len_to_ends and not (re.search('N+', chr_seq[which_pos:which_pos+10]) or re.search('N+', chr_seq[which_pos-9:which_pos+1])) :
 			if len_chr_seq - which_pos >= len_to_ends and which_pos >= len_to_ends and chr_seq[which_pos] != 'N' :				# the breakpoints cannot be inside of a block of Ns #
 				break
 		if pre_which_pos == 0 :
@@ -126,13 +131,13 @@ def get_breakpoints(num_recomb_per_chr, len_chr_seq, chr_seq) :
 	breakpoints.sort()
 	return breakpoints
 
-def sim_recombinants(cross_design, num_recomb_per_chr, mchr_dict, pchr_dict, num_recombinants, out_prefix) :
+def sim_recombinants(cross_design, num_recomb_per_chr, mchr_dict, pchr_dict, popsize, outprefix) :
 	# simulate recombinants #
-	for i in range(num_recombinants) :
-		out_m_haploid = out_prefix+"%s_m.fasta" %(i+1)
-		out_p_haploid = out_prefix+"%s_p.fasta" %(i+1)
-		out_m_haploid_handle = open(out_m_haploid, 'w')
-		out_p_haploid_handle = open(out_p_haploid, 'w')
+	for i in range(popsize) :
+		mHap_outfile = outprefix+"%s_m.fasta" %(i+1)
+		pHap_outfile = outprefix+"%s_p.fasta" %(i+1)
+		mHapOut = open(mHap_outfile, 'w')
+		pHapOut = open(pHap_outfile, 'w')
 
 		for chr_id, mchr_seq in mchr_dict.iteritems() :
 			# 1. get the corresopnding pair of chromosome, e.g. chr01_m and chr01_p #
@@ -140,67 +145,54 @@ def sim_recombinants(cross_design, num_recomb_per_chr, mchr_dict, pchr_dict, num
 			# 2. for each of the pair, we need to simulate the meiosis to generate maternal and paternal gametes, from which to obtain a recombinant for the current pair #
 			m_or_p = random.randint(1,2)					# randomly choose to either maternal (1) or paternal (2) copy of the current chromosome for generate one of the two gametes #
 			if m_or_p == 1 :
-				print "Making one of the two gametes from the maternal copy of the current chromosome %s" %(chr_id)
 				one_gamete, breakpoints_gamete = make_gametes(mchr_seq, pchr_seq, num_recomb_per_chr)			# breakpoints will be made on the maternal copy of the current chromosome #
 			else :
-				print "Making one of the two gametes from the paternal copy of the current chromosome %s" %(chr_id)
 				one_gamete, breakpoints_gamete = make_gametes(pchr_seq, mchr_seq, num_recomb_per_chr)			# breakpoints will be made on the paternal copy of the current chromosome #
-			sys.stdout.write("Output the first gamete of the current chromosome to file ...")
-			outputter(one_gamete, m_or_p, chr_id, breakpoints_gamete, out_m_haploid_handle)
-			print " [Done]"
+			outputter(one_gamete, m_or_p, chr_id, breakpoints_gamete, mHapOut)
 			if cross_design == "RILs" :
-				sys.stdout.write("Output the first gamete of the current chromosome to file ...")
-				outputter(one_gamete, m_or_p, chr_id, breakpoints_gamete, out_p_haploid_handle)
-				print " [Done]"
+				outputter(one_gamete, m_or_p, chr_id, breakpoints_gamete, pHapOut)
 			else :
 				m_or_p = random.randint(1,2)					# randomly choose to either maternal (1) or paternal (2) copy of the current chromosome for generate the second gamete #
 				if m_or_p == 1 :
-					print "Making the second gametes from the maternal copy of the current chromosome %s" %(chr_id)
 					second_gamete, breakpoints_gamete = make_gametes(mchr_seq, pchr_seq, num_recomb_per_chr)
 				else :
-					print "Making the second gametes from the paternal copy of the current chromosome %s" %(chr_id)
 					second_gamete, breakpoints_gamete = make_gametes(pchr_seq, mchr_seq, num_recomb_per_chr)
-				sys.stdout.write("Output the second gamete of the current chromosome to file ...")
-				outputter(second_gamete, m_or_p, chr_id, breakpoints_gamete, out_p_haploid_handle)
-				print " [Done]"
+				outputter(second_gamete, m_or_p, chr_id, breakpoints_gamete, pHapOut)
 
-		out_p_haploid_handle.close()
-		out_m_haploid_handle.close()
-		print "recombinant %d simulation is finished" %(i+1)
+		pHapOut.close()
+		mHapOut.close()
+		stdout.write("recombinant %d is simulated\n" %(i+1))
 
 if __name__ == "__main__" :
-	cross_design = sys.argv[1]
-	num_recomb_per_chr = int(sys.argv[2])			# this is the number of crossovers per chromosome of the last generation #
-	mhaploid = sys.argv[3]
-	phaploid = sys.argv[4]
-	num_recombinants = int(sys.argv[5])
-	out_prefix = sys.argv[6]
+	parser = ArgumentParser(description="Simulating a population of recombinants with user-defined number of cross-over events per chromosome, e.g. F2s, RILs")
+	parser.add_argument("-cross_design", metavar="STR", dest="cross_design", required=True, choices=["RILs", "F2"], help="Specify the type of crossing design: F2s, RILs")
+	parser.add_argument("-p1", metavar="FILE", dest="p1", required=True, help="Specify sequence file (in fasta) of one of the parents")
+	parser.add_argument("-p2", metavar="FILE", dest="p2", required=True, help="Specify sequence file (in fasta) of the other parent")
+	parser.add_argument("-popsize", metavar="INT", dest="popsize", type=int, default=96, help="Specify the number of recombinants you'd like in your population. DEFAULT: 96")
+	parser.add_argument("-ncross", metavar="INT", dest="num_recomb_per_chr", type=int, default=5, help="Specify the number of crossing-over events per chrmosome. DEFAULT: 5")
+	parser.add_argument("-outprefix", metavar="STR", dest="outprefix", help="Specify the output prefix")
+
+	args = parser.parse_args()
 
 	# setup the output path #
-	if re.search("\/", out_prefix) :
-		tmp_dir = out_prefix.rstrip(os.path.basename(out_prefix))
-		if not os.path.exists(tmp_dir) :
-			os.makedirs(tmp_dir)
-	else :
-		# the output file with the defined prefix name will be created under the current working directory, if no other output path being specified #
-		print os.getcwd()
-		out_prefix = os.path.join(os.getcwd(), out_prefix)
+	abs_outprefix = realpath(args.outprefix)
+	print abs_outprefix
+	outdir = dirname(abs_outprefix)
+	if not exists(outdir) :
+		makedirs(outdir)
 
-	num_mchr = 0
-	sys.stdout.write("reading maternal copy ... ")
-	mchr_dict, num_mchr = read_genome(mhaploid, "maternal")
-	sys.stdout.write("%d chromosomes are included in the maternal copy of the genome" %(num_mchr))
-	print " ... [Done]"
+	nchr_p1 = 0
+	stdout.write("reading one parent: %s\n" %(args.p1))
+	mchr_dict, nchr_p1 = read_genome(args.p1, "p1")
+	stdout.write("\t%d chromosomes parsed\n" %(nchr_p1))
 
-	num_pchr = 0
-	sys.stdout.write("reading paternal copy ... ")
-	pchr_dict, num_pchr = read_genome(phaploid, "paternal")
-	sys.stdout.write("%d chromosomes are included in the paternal copy of the genome" %(num_pchr))
-	print " ... [Done]"
+	nchr_p2 = 0
+	stdout.write("reading the other parent: %s\n" %(args.p2))
+	pchr_dict, nchr_p2 = read_genome(args.p2, "p2")
+	stdout.write("\t%d chromosomes parsed\n" %(nchr_p2))
 
-	if num_pchr != num_mchr :
-		print "Error: you have different number of chromosomes between your maternal (num_mchr) and paternal (num_pchr) copies of the genome"
-		sys.exit()
+	if nchr_p1 != nchr_p2 :
+		stderr.write("Error: two parents contain different numbers of chromosomes")
+		exit()
 
-	sim_recombinants(cross_design, num_recomb_per_chr, mchr_dict, pchr_dict, num_recombinants, out_prefix)
-
+	sim_recombinants(args.cross_design, args.num_recomb_per_chr, mchr_dict, pchr_dict, args.popsize, abs_outprefix)
