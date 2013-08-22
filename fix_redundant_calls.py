@@ -5,7 +5,7 @@ from sys import exit, stdout, stderr
 from os import makedirs
 from os.path import exists, realpath, dirname
 
-def process_VCF(input_vcf, out_dup_file, out_vcf = None) :
+def process_VCF(input_vcf, targets_file, out_vcf = None) :
 	"""
 	identify duplicates and remove them if -fixoff is not specified
 	"""
@@ -13,7 +13,7 @@ def process_VCF(input_vcf, out_dup_file, out_vcf = None) :
 	fVCF_OUT = None
 	if out_vcf is not None :
 		fVCF_OUT = open(out_vcf, 'w')
-	fDUP_OUT = open(out_dup_file, 'w')
+	fDUP_OUT = open(targets_file, 'w')
 
 	variants_dict = {}
 	variants_list = []
@@ -81,7 +81,7 @@ def make_dir_if_needed(dir) :
 if __name__ == "__main__" :
 	parser = ArgumentParser(description="Identify and remove variants sites where two types of variants (SNP, INDEL) were identified.")
 	parser.add_argument("-vcf", metavar="FILE", dest="vcf_file", required=True, help="input VCF file")
-	parser.add_argument("-duplicates", metavar="FILE", dest="out_dup_file", required=True, help="output plain text with duplicated items identified, Whether or not -fixoff is specified, the program will spit out this file")
+	parser.add_argument("-targets", metavar="FILE", dest="targets_file", required=True, help="output plain text with duplicated items identified, Whether or not -fixoff is specified, the program will spit out this file")
 	parser.add_argument("-out", metavar="FILE", dest="out_file", help="output VCF file with duplicates removed. Not required if -fixoff is specified")
 	parser.add_argument("-fixoff", action="store_true", dest="fix_or_not", help="turn off removing identified duplicates from input VCF file. No output VCF will be expected if this is specified")
 
@@ -92,22 +92,16 @@ if __name__ == "__main__" :
 		stderr.write(time_stamper() + " Error: cannot find the VCF file you provided: %s" %(args.vcf_file))
 		exit()
 
-	make_dir_if_needed(dirname(realpath(args.out_dup_file)))
-	out_dup_file = realpath(args.out_dup_file)
+	make_dir_if_needed(dirname(realpath(args.targets_file)))
+	targets_file = realpath(args.targets_file)
 
-	fix = -1
 	if args.fix_or_not :
-		fix = 0
-	else :
-		fix = 1
-
-	if fix :
 		if not args.out_file :
 			stderr.write(time_stamper() + " Error: you need to provide a path to the output VCF file with duplicate removed, since you specified -fix\n")
 			exit()
 		else :
 			make_dir_if_needed(dirname(realpath(args.out_file)))
 			out_file = realpath(args.out_file)
-			process_VCF(args.vcf_file, out_dup_file, out_file)
+			process_VCF(args.vcf_file, targets_file, out_file)
 	else :
-		process_VCF(args.vcf_file, out_dup_file)
+		process_VCF(args.vcf_file, targets_file)
