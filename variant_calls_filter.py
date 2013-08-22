@@ -1,3 +1,5 @@
+#Notes: change the way "-filter" argument was defined in next version
+
 from sys import exit, stdout, stderr
 from os.path import exists, dirname, realpath
 from os import makedirs
@@ -52,7 +54,7 @@ def time_stamper() :
 	return datetime.now().strftime("%Y-%d-%m-%H-%M-%S")
 
 if __name__ == "__main__" :
-	parser = ArgumentParser(description="")
+	parser = ArgumentParser(description="Apply pre-defined filter to raw VCF file.")
 	parser.add_argument("-raw_vcf", metavar="FILE", dest="raw_vcf", required=True, help="raw VCF file to be filtered")
 	parser.add_argument("-filtered_vcf", metavar="FILE", dest="filtered_vcf", required=True, help="filtered VCF file")
 	parser.add_argument("-filter", metavar="A:B:C", dest="filter", help="sites (1) where at least A individuals that are homozygous for the non-reference base with a minimum of BX coverage, and (2) where at most C individuals is genotyped as heterozygous. Example: 1:4:1")
