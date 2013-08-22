@@ -15,6 +15,7 @@ def annotate_VCF(raw_vcf, vqsr_vcf, out_annotated_vcf) :
 	sites_passed_VQSR_dict = {}
 	all_sites_dict = {}
 	num_passed_sites,  num_all_sites = 0, 0
+	stdout.write("Paring the VQSR VCF file ...\n")
 	fVQSR_VCF = open(vqsr_vcf, 'r')
 	for line in fVQSR_VCF :
 		if not line.startswith('#') :
@@ -43,10 +44,11 @@ def annotate_VCF(raw_vcf, vqsr_vcf, out_annotated_vcf) :
 				#else :
 				#	stdout.write(time_stamper() + " Warning: filtered sites where different types of variants were identified: %s\n" %(chrom_id+':'+chrom_pos))
 	fVQSR_VCF.close()
-	stdout.write("%d sites passed GATK VQSR in %s\n" %(num_passed_sites, vqsr_vcf))
-	stdout.write("%d sites filtered by GATK VQSR in %s\n" %(num_all_sites-num_passed_sites, vqsr_vcf)
-	stdout.write("%d sites contained in %s\n" %(num_all_sites, vqsr_vcf))
+	stdout.write("\t%d sites passed GATK VQSR in %s\n" %(num_passed_sites, vqsr_vcf))
+	stdout.write("\t%d sites filtered by GATK VQSR in %s\n" %(num_all_sites-num_passed_sites, vqsr_vcf))
+	stdout.write("\t%d sites contained in %s\n" %(num_all_sites, vqsr_vcf))
 
+	stdout.write("Output to annotated VCF file: %s\n" %(out_annotated_vcf))
 	fOUT = open(out_annotated_vcf, 'w')
 
 	num_filtered = 0
@@ -92,10 +94,10 @@ def time_stamper() :
 	return datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
 if __name__ == "__main__" :
-	parser = ArgumentParser(description="")
-	parser.add_argument("-raw_vcf", metavar="FILE", dest="raw_vcf", required=True, help="VCF file with its \"FILTER\" field unannotated")
-	parser.add_argument("-vqsr_vcf", metavar="FILE", dest="vqsr_vcf", required=True, help="VCF file obtained after GATK VQSR, with its \"FILTER\" field annotated with either \"PASS\" or SOMETHING ELSE")
-	parser.add_argument("-out", metavar="FILE", dest="out_annotated_vcf", required=True, help="output VCF file with its \"FILTER\" field annotated")
+	parser = ArgumentParser(description="Annotate the FILTER field of a give VCF file with either PASS or FILTERE, based on a second VCF file obtained from GATK VQSR")
+	parser.add_argument("-raw_vcf", metavar="FILE", dest="raw_vcf", required=True, help="VCF file with its FILTER field unannotated")
+	parser.add_argument("-vqsr_vcf", metavar="FILE", dest="vqsr_vcf", required=True, help="VCF file obtained after GATK VQSR, with its FILTER field annotated with either PASS or SOMETHING ELSE")
+	parser.add_argument("-out", metavar="FILE", dest="out_annotated_vcf", required=True, help="output VCF file with its FILTER field annotated")
 
 	args = parser.parse_args()
 
