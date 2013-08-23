@@ -1,6 +1,3 @@
-# The script is used to get the genotypes of each individual at each locus, and output to a file that is ready to be used by RQTL #
-# At the same time, the program will identify candidate sites for incorrectly collapsed alleles (segments of DNA supposed to have two or more copies are incorrectly merged by assemblers)
-
 import re
 from argparse import ArgumentParser
 from os.path import exists, dirname, realpath, join
@@ -8,10 +5,12 @@ from os import makedirs
 from sys import exit, stdout, stderr
 from datetime import datetime
 
-#global_scaffolds = ["scaffold_72", "scaffold_32", "scaffold_60", "scaffold_19", "scaffold_45", "scaffold_17", "scaffold_74",  "scaffold_52", "scaffold_40", "scaffold_30"]
+def prepare_genotype_for_phasing(vcf_file) :
+	"""
+	get genotypes from the VCF file
+	"""
 
-# get genotypes from the VCF file #
-def Genotypes_Parser(vcf_file, module) :
+	stdout.write("Reading VCF file %s\n" %(vcf_file))
 	genotypes_dict = {}
 	alleles_dict, variants_dict = {}, {}
 	rilsID_to_Int_dict = {}
@@ -84,7 +83,6 @@ def Genotypes_Parser(vcf_file, module) :
 		stdout.write("\t%d variant sites being processed\n" %((((num_variant_sites+1)/10000)*10000)))
 	fVCF.close()
 	stdout.write("\t%d variants parsed\n" %(num_variant_sites))
-	exit()
 	#################
 	# debug purpose #
 	#################
@@ -416,10 +414,13 @@ def getKnownLinkageGroups(known_LGs_file) :
 		known_LGs_dict[lg_id] = scaffolds
 		scaffolds = []
 	fLG.close()
-	print embedded_scaffolds_dict
-	print scaffolds_orientation_dict
-	for key, value in known_LGs_dict.iteritems() :
-		print key, known_LGs_dict[key]
+	"""
+	debug purpose
+	"""
+	#print embedded_scaffolds_dict
+	#print scaffolds_orientation_dict
+	#for key, value in known_LGs_dict.iteritems() :
+	#	print key, known_LGs_dict[key]
 	return known_LGs_dict, embedded_scaffolds_dict, scaffolds_orientation_dict
 
 def getNumVariantsForLG(num_markers_per_chr_dict, scaffolds_list) :
@@ -432,7 +433,7 @@ def getNumVariantsForLG(num_markers_per_chr_dict, scaffolds_list) :
 	return num_variant_sites_per_lg
 
 # prepare genotypes file for phasing program #
-def prepare_gtyps_for_Phasing(alleles_dict, samples, scaffolds_list, outfile_handle, embedded_scaffolds_dict, scaffolds_orientation_dict) :
+def prepare_inputs_for_fastphase(alleles_dict, samples, scaffolds_list, outfile_handle, embedded_scaffolds_dict, scaffolds_orientation_dict) :
 	for i in range(len(samples)) :
 		outfile_handle.write("#id_%s\n" %(samples[i]))
 		first_alleles, second_alleles = [], []
@@ -478,19 +479,14 @@ def prepare_inputs_for_beagle(alleles_dict, samples, scaffolds_list, outfile, em
 				key = samples[k] + "\t" + scaffolds_list[i]
 				first_allele = re.split('_', tmp_alleles_dict[key][j])[0]
 				second_allele = re.split('_', tmp_alleles_dict[key][j])[1]
-				#print key, tmp_alleles_dict[key][j]
-				#print first_allele, second_allele
 				fOUT.write(" %s %s" %(first_allele, second_allele))
 			fOUT.write('\n')
 			cumulative += 1
 	fOUT.close()
 
-# output indels information #
 def outputter_variants(variants_dict, scaffolds_list, variants_outfile, scaffolds_orientation_dict) :
-	fINDELOUT = open(variants_outfile, 'w')
+	fVARIANTOUT = open(variants_outfile, 'w')
 	for i in range(len(scaffolds_list)) :
-		#if scaffolds_list[i] in ["scaffold_19", "scaffold_60", "scaffold_52"] :
-		#if scaffolds_list[i] in global_scaffolds :
 		tmp_pos_list = []
 		for key in variants_dict.iterkeys() :
 			each_scaffold = re.split(":", key)[0]
@@ -503,8 +499,8 @@ def outputter_variants(variants_dict, scaffolds_list, variants_outfile, scaffold
 			tmp_pos_list = sorted(tmp_pos_list, reverse=True)
 		for j in range(len(tmp_pos_list)) :
 			if variants_dict.has_key(scaffolds_list[i]+":"+str(tmp_pos_list[j])) :
-				fINDELOUT.write("%s\t%s\n" %(scaffolds_list[i]+":"+str(tmp_pos_list[j]), variants_dict[scaffolds_list[i]+":"+str(tmp_pos_list[j])]))
-	fINDELOUT.close()
+				fVARIANTOUT.write("%s\t%s\n" %(scaffolds_list[i]+":"+str(tmp_pos_list[j]), variants_dict[scaffolds_list[i]+":"+str(tmp_pos_list[j])]))
+	fVARIANTOUT.close()
 
 def timestamper() :
 	"""
@@ -527,13 +523,13 @@ def command_parser() :
 	# add option group for analysis "prepare_mapping"
 	prepare_mapping_args_group = parser.add_argument_group("Options for \"prepare_mapping\" analysis", "generate genotype tables that are ready for downstream MSTMAP and/or rQTL\n")
 	prepare_mapping_args_group.add_argument("-thinoff", dest="thin_or_not", action='store_true', help="turn off thining the genotype table. Not suggested if you get a big table")
-	#prepare_mapping_args_group.add_argument("-thin_mode", dest="thin_mode", choices=["sliding_window", "random"], default="sliding_window", help="specify how you want to thin your genotype table. Current version only supports sliding_window. Other modes are coming soon")
+	#prepare_mapping_args_group.add_argument("-thin_mode", dest="thin_mode", choices=["sliding_window", "random"], default="sliding_window", help="specify how you want to thin your genotype table. Current version only supports sliding_window")
 	prepare_mapping_args_group.add_argument("-gt_outfmt", metavar="STR", dest="gt_outfmt", choices=["mstmap", "rqtl", "both"], type=str, default="both", help="specify the format of the output genotype table. Current version supports: mstmap, rqtl, and both. By default, genotype tables in both formats will be generated")
 	prepare_mapping_args_group.add_argument("-gt_proposal", metavar="FILE", dest="gt_proposal_file", help="file of genotypes proposed at variant sites")
 
 	# add option group for analysis "prepare_phasing"
 	prepare_phasing_args_group = parser.add_argument_group("Options for \"prepare_phasing\" analysis", "generate genotype file for downstream Phasing programs\n")
-	prepare_phasing_args_group.add_argument("-known_LGs", metavar="FILE", dest="known_LGs_file", help="a file of a set of known linkage groups. If available, the output file generated for phasing program will be categorized by linkage group")
+	prepare_phasing_args_group.add_argument("-known_LGs", metavar="FILE", dest="known_LGs_file", help="a file of a set of known linkage groups. If available, the output file generated for phasing program will be categorized by linkage group. Current version, this file must be provided")
 	prepare_phasing_args_group.add_argument("-phasing_outfmt", metavar="STR", dest="phasing_outfmt", choices=["fastphase", "beagle"], type=str, default="fastphase", help="specify the format of the output genotype file for the following Phasing programs. Current version supports: fastphase, beagle")
 
 	args = parser.parse_args()
@@ -555,6 +551,7 @@ def run_prepare_mapping(module, vcf_file, gt_proposal_file, out_prefix, gt_outfm
 	stdout.write("###################################################################\n")
 	stdout.write("#Analysis: %s\n" %(module))
 	stdout.write("#VCF: %s\n" %(vcf_file))
+	stdout.write("#Proposed genotypes: %s\n" %(gt_proposal_file))
 	stdout.write("#Genotype Table output: %s\n" %(out_prefix))
 	stdout.write("#Ouput Format: %s\n" %(gt_outfmt))
 	if thin_or_not :
@@ -676,37 +673,43 @@ def run_prepare_phasing(module, vcf_file, known_LGs_file, out_prefix, phasing_ou
 	stdout.write("#VCF: %s\n" %(vcf_file))
 	stdout.write("#output prefix: %s\n" %(out_prefix))
 	stdout.write("#Ouput Format: %s\n" %(phasing_outfmt))
+	stdout.write("#Known linkage group file: %s\n" %(known_LGs_file))
 	stdout.write("###################################################################\n")
-	alleles_dict, variants_dict, samples, num_markers_per_chr_dict, num_variant_sites = Genotypes_Parser(vcf_file, module)
+	alleles_dict, variants_dict, samples, num_markers_per_chr_dict, num_variant_sites = prepare_genotype_for_phasing(vcf_file)
 	known_LGs_dict, embedded_scaffolds_dict = {}, {}
 	outfile = ""
 	if known_LGs_file != "" :
+		stdout.write("Preparing phasing inputs per linkage group\n")
 		known_LGs_dict, embedded_scaffolds_dict, scaffolds_orientation_dict = getKnownLinkageGroups(known_LGs_file)
 		for each_lg, scaffolds_list in known_LGs_dict.iteritems() :
-			#if each_lg == "lg_5" :
 			num_variant_sites_per_lg = getNumVariantsForLG(num_markers_per_chr_dict, scaffolds_list)
-			print each_lg, num_variant_sites_per_lg
-			variants_outfile = out_prefix + "%s.variants" %(each_lg)
+			stdout.write("\t%s\t%d variants\n" %(each_lg, num_variant_sites_per_lg))
+			variants_outfile = out_prefix + ".%s.variants" %(each_lg)
 			outputter_variants(variants_dict, scaffolds_list, variants_outfile, scaffolds_orientation_dict)
 			if phasing_outfmt == "fastphase" :
-				outfile = out_prefix + "%s.inp" %(each_lg)
+				outfile = out_prefix + ".%s.inp" %(each_lg)
 				fOUT = open(outfile, 'w')
 				fOUT.write("%d\n" %(len(samples)))
 				fOUT.write("%d\n" %(num_variant_sites_per_lg))
-				prepare_gtyps_for_Phasing(alleles_dict, samples, scaffolds_list, fOUT, embedded_scaffolds_dict, scaffolds_orientation_dict)
+				prepare_inputs_for_fastphase(alleles_dict, samples, scaffolds_list, fOUT, embedded_scaffolds_dict, scaffolds_orientation_dict)
 			elif phasing_outfmt == "beagle" :
-				outfile = out_prefix + "%s.bgl.unphased" %(each_lg)
+				outfile = out_prefix + ".%s.bgl.unphased" %(each_lg)
 				prepare_inputs_for_beagle(alleles_dict, samples, scaffolds_list, outfile, embedded_scaffolds_dict, scaffolds_orientation_dict, num_markers_per_chr_dict)
 	else :
-		if phasing_outfmt == "fastphase" :
-			OUTFILE = Out_prefix + ".inp"
-		scaffolds_list = []
-		for each_scaffold in num_markers_per_chr_dict.iterkeys() :
-			scaffolds_list.append(each_scaffold)
-		fOUT = open(outfile, 'w')
-		fOUT.write("%d\n" %(len(samples)))
-		fOUT.write("%d\n" %(num_variant_sites))
-		prepare_gtyps_for_Phasing(alleles_dict, samples, scaffolds_list, fOUT)
+		stderr.write(timestamper() + " Error: you need to provide a file with linkage group information")
+	"""
+	fix me
+	"""
+	#else :
+	#	if phasing_outfmt == "fastphase" :
+	#		OUTFILE = Out_prefix + ".inp"
+	#	scaffolds_list = []
+	#	for each_scaffold in num_markers_per_chr_dict.iterkeys() :
+	#		scaffolds_list.append(each_scaffold)
+	#	fOUT = open(outfile, 'w')
+	#	fOUT.write("%d\n" %(len(samples)))
+	#	fOUT.write("%d\n" %(num_variant_sites))
+	#	prepare_inputs_for_fastphase(alleles_dict, samples, scaffolds_list, fOUT)
 
 if __name__ == "__main__" :
 	command_parser()
