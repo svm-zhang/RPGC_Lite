@@ -1,12 +1,14 @@
 # The script is used to get the genotypes of each individual at each locus, and output to a file that is ready to be used by RQTL #
 # At the same time, the program will identify candidate sites for incorrectly collapsed alleles (segments of DNA supposed to have two or more copies are incorrectly merged by assemblers)
 
-import os, sys
 import re
-import getopt
-import argparse
+from argparse import ArgumentParser
+from os.path import exists, dirname, realpath, join
+from os import makedirs
+from sys import exit, stdout, stderr
+from datetime import datetime
 
-global_scaffolds = ["scaffold_72", "scaffold_32", "scaffold_60", "scaffold_19", "scaffold_45", "scaffold_17", "scaffold_74",  "scaffold_52", "scaffold_40", "scaffold_30"]
+#global_scaffolds = ["scaffold_72", "scaffold_32", "scaffold_60", "scaffold_19", "scaffold_45", "scaffold_17", "scaffold_74",  "scaffold_52", "scaffold_40", "scaffold_30"]
 
 # get genotypes from the VCF file #
 def Genotypes_Parser(vcf_file, module) :
@@ -16,7 +18,7 @@ def Genotypes_Parser(vcf_file, module) :
 	num_variant_sites, num_variant_sites_per_chrom = 0, 0
 	num_variants_kept = 0
 	samples = []
-	num_markers_per_scaf_dict = {}
+	num_markers_per_chr_dict = {}
 	chrom_id, last_chrom_id = "", ""
 	fVCF = open(vcf_file, 'r')
 	for line in fVCF :
@@ -30,7 +32,7 @@ def Genotypes_Parser(vcf_file, module) :
 				last_chrom_id = chrom_id
 			else :
 				if last_chrom_id != chrom_id :
-					num_markers_per_scaf_dict[last_chrom_id] = num_variant_sites_per_chrom
+					num_markers_per_chr_dict[last_chrom_id] = num_variant_sites_per_chrom
 					num_variant_sites_per_chrom = 0
 					last_chrom_id = chrom_id
 			num_variant_sites += 1
@@ -47,28 +49,6 @@ def Genotypes_Parser(vcf_file, module) :
 					num_het += 1
 			if num_missing != len(samples) :
 				if num_het/float(len(samples) - num_missing) <= 0.05 and num_missing <= 4 :
-					#if len(re.split('\,', ref_base)) > 1 or len(re.split('\,', alt_base)) > 1 :
-					#	continue
-					#else :
-					#	if len(alt_base) > 1 and len(ref_base) == 1 :
-					#		variants_dict[chrom_id+":"+variant_site_pos] = ref_base + '\t' + alt_base + "\tindel"
-					#		alt_base = "I"
-					#	elif len(ref_base) > 1 and len(alt_base) == 1 :
-					#		variants_dict[chrom_id+":"+variant_site_pos] = ref_base + '\t' + alt_base + "\tindel"
-					#		#ref_base = "D"
-					#		ref_base = 'I'
-					#	elif len(ref_base) == 1 and len(alt_base) == 1 :
-					#		variants_dict[chrom_id+":"+variant_site_pos] = ref_base + "\t" + alt_base
-					#	else :
-					#		if len(ref_base) > len(alt_base) :
-					#			variants_dict[chrom_id+":"+variant_site_pos] = ref_base + '\t' + alt_base + "\tmnp_deletion"
-					#			ref_base, alt_base = 'M', 'N'
-					#			print variants_dict[chrom_id+":"+variant_site_pos]
-					#		elif len(ref_base) < len(alt_base) :
-					#			variants_dict[chrom_id+":"+variant_site_pos] = ref_base + '\t' + alt_base + "\tmnp_insertion"
-					#			ref_base, alt_base = 'N', 'M'
-					#			print chrom_id, variant_site_pos, ref_base, alt_base
-					#			sys.exit()
 					if len(ref_base) == 1 and len(alt_base) == 1 :
 						variants_dict[chrom_id+":"+variant_site_pos] = ref_base + "\t" + alt_base
 						num_variants_kept += 1
@@ -86,10 +66,8 @@ def Genotypes_Parser(vcf_file, module) :
 								tmp_alleles = "%s_%s" %(ref_base, alt_base)
 							if not alleles_dict.has_key(samples[i]+"\t"+chrom_id) :
 								alleles_dict[samples[i]+"\t"+chrom_id] = [tmp_alleles]
-								#alleles_dict[samples[i]+"\t"+chrom_id] = [variant_site_pos+':'+tmp_alleles]
 							else :
 								alleles_dict[samples[i]+"\t"+chrom_id].append(tmp_alleles)
-								#alleles_dict[samples[i]+"\t"+chrom_id].append(variant_site_pos+':'+tmp_alleles)
 						###########################################
 						# this is for faking the genotypes for f1 #
 						###########################################
@@ -98,15 +76,15 @@ def Genotypes_Parser(vcf_file, module) :
 						else :
 							alleles_dict["f1\t"+chrom_id].append("%s_%s" %(ref_base, alt_base))
 			if (num_variant_sites+1) % 10000 == 0 :
-				print "%d variant sites being processed" %((((num_variant_sites+1)/10000)*10000))
-	num_markers_per_scaf_dict[last_chrom_id] = num_variant_sites_per_chrom
+				stdout.write("\t%d variant sites being processed\n" %((((num_variant_sites+1)/10000)*10000)))
+	num_markers_per_chr_dict[last_chrom_id] = num_variant_sites_per_chrom
 	if (((num_variant_sites+1)/10000.0)-(num_variant_sites/10000))*10000 < 10000 :
-		print "%d variant sites being processed" %((((num_variant_sites+1)/10000.0)-(num_variant_sites/10000))*10000)
+		stdout.write("\t%d variant sites being processed\n" %((((num_variant_sites+1)/10000.0)-(num_variant_sites/10000))*10000))
 	elif (num_variant_sites+1) % 10000 == 0 :
-		print "%d variant sites being processed" %((((num_variant_sites+1)/10000)*10000))
+		stdout.write("\t%d variant sites being processed\n" %((((num_variant_sites+1)/10000)*10000)))
 	fVCF.close()
-	print "The number of variants at which genotypes of individulas were called is: %d" %(num_variant_sites)
-	print "The number of variants kept for homozygosity: %d" %(num_variants_kept)
+	stdout.write("\t%d variants parsed\n" %(num_variant_sites))
+	exit()
 	#################
 	# debug purpose #
 	#################
@@ -115,25 +93,25 @@ def Genotypes_Parser(vcf_file, module) :
 	#	if re.search("f1\t", key) :
 	#		num += len(alleles_dict[key])
 	#print num
-	#sys.exit()
-	if module == "parse_for_LinkageMapping" :
-		return genotypes_dict, samples, num_markers_per_scaf_dict, num_variant_sites
-	elif module == "parse_for_Phasing" :
-		return alleles_dict, variants_dict, ["f1"]+samples, num_markers_per_scaf_dict, num_variant_sites
+	#exit()
+	#if module == "prepare_mapping" :
+	#	return genotypes_dict, samples, num_markers_per_chr_dict, num_variant_sites
+	#elif module == "parse_for_Phasing" :
+	return alleles_dict, variants_dict, ["f1"]+samples, num_markers_per_chr_dict, num_variant_sites
 
 def outputter_gt_table(genotypes_dict, samples, num_variant_sites, out_prefix, out_format, thinflag) :
 	if out_format == "mstmap" :
 		if not thinflag :
-			out_full_genotype_table = out_prefix + "_%d_markers.mst" %(num_variant_sites)
+			out_gt_table = out_prefix + "_%d_markers.mst" %(num_variant_sites)
 		else :
-			out_full_genotype_table = out_prefix + "_%d_markers.mst" %(num_variant_sites)
+			out_gt_table = out_prefix + "_%d_markers.mst" %(num_variant_sites)
 	elif out_format == "rqtl" :
 		if not thinflag :
-			out_full_genotype_table = out_prefix + "_%d_markers.rqtl" %(num_variant_sites)
+			out_gt_table = out_prefix + "_%d_markers.rqtl" %(num_variant_sites)
 		else :
-			out_full_genotype_table = out_prefix + "_%d_markers.rqtl" %(num_variant_sites)
-	print out_full_genotype_table
-	outGTable = open(out_full_genotype_table, 'w')
+			out_gt_table = out_prefix + "_%d_markers.rqtl" %(num_variant_sites)
+	stdout.write("Output genotypes of %d individulas at %d sites into %s\n" %(len(samples), num_variant_sites, out_gt_table))
+	outGTable = open(out_gt_table, 'w')
 	if out_format == "mstmap" :
 		outGTable.write("markers\t")
 	elif out_format == "rqtl" :
@@ -172,8 +150,12 @@ def outputter_gt_table(genotypes_dict, samples, num_variant_sites, out_prefix, o
 		outGTable.flush()
 	outGTable.close()
 
-# thinning out the genotype table and prepare the table ready for MSTMAP and rQTL #
-def thinning_genotyp_table(gt_dict, num_markers_per_scaf_dict, num_variant_sites, out_prefix, out_format) :
+def thinning_genotyp_table(gt_dict, num_markers_per_chr_dict, num_variant_sites, out_prefix, out_format) :
+	"""
+	thinning out the genotype table and prepare the table ready for MSTMAP and rQTL
+	"""
+
+	stdout.write("Start thinning the genotypes\n")
 	individual, last_individual = "", ""
 	breaks_individual_dict = {}
 	for individual, gt_info in sorted(gt_dict.iteritems()) :
@@ -188,12 +170,12 @@ def thinning_genotyp_table(gt_dict, num_markers_per_scaf_dict, num_variant_sites
 			gt = tmp[2]
 			if last_chrom_id == "" :
 				last_chrom_id = chrom_id
-				step += num_markers_per_scaf_dict[last_chrom_id]
+				step += num_markers_per_chr_dict[last_chrom_id]
 			else :
 				if last_chrom_id != chrom_id :
-					step += num_markers_per_scaf_dict[chrom_id]
-					if num_markers_per_scaf_dict[chrom_id] <= 10 :
-					#if num_markers_per_scaf_dict[chrom_id] <= 30 :
+					step += num_markers_per_chr_dict[chrom_id]
+					if num_markers_per_chr_dict[chrom_id] <= 10 :
+					#if num_markers_per_chr_dict[chrom_id] <= 30 :
 						tmp1 = re.split(":", gt_info[i-1])
 						tmp_marker_index = re.sub("_", "at", tmp1[0]) + "at" + tmp1[1]
 						breaks_individual_dict[individual].append("%s:%s" %(tmp_marker_index, last_gt))
@@ -359,7 +341,6 @@ def thinning_genotyp_table(gt_dict, num_markers_per_scaf_dict, num_variant_sites
 			if re.split(":", breaks[i])[0] not in overall_breaks_list :
 				overall_breaks_list.append(re.split(":", breaks[i])[0])
 	num_variant_sites = len(overall_breaks_list)
-	print num_variant_sites
 
 	breaks_per_chrom_dict = {}
 	for i in range(len(sorted(overall_breaks_list))) :
@@ -403,21 +384,21 @@ def thinning_genotyp_table(gt_dict, num_markers_per_scaf_dict, num_variant_sites
 	thinning_logfile = out_prefix + "_thinned.log"
 	fLOG = open(thinning_logfile, 'w')
 	for chrom in sorted(breaks_per_chrom_dict.iterkeys()) :
-		fLOG.write("%s\t%s\t%s\n" %(chrom, num_markers_per_scaf_dict[re.sub("at", "_", chrom)], len(breaks_per_chrom_dict[chrom])))
+		fLOG.write("%s\t%s\t%s\n" %(chrom, num_markers_per_chr_dict[re.sub("at", "_", chrom)], len(breaks_per_chrom_dict[chrom])))
 	fLOG.close()
-	print "the number of variants after thinning is %d" %(num_variant_sites)
+	stdoutleft.write("\t%d variant sites kept\n" %(num_variant_sites))
 	return thinned_gt_table_dict, num_variant_sites
 
-def getKnownLinkageGroups(known_lg_file) :
-	known_lgs_dict, embedded_scaffolds_dict = {}, {}
+def getKnownLinkageGroups(known_LGs_file) :
+	known_LGs_dict, embedded_scaffolds_dict = {}, {}
 	scaffolds_orientation_dict = {}
 	scaffolds = []
 	lg_id = ""
-	fLG = open(known_lg_file, 'r')
+	fLG = open(known_LGs_file, 'r')
 	for line in fLG :
 		if line.startswith(">") :
 			if len(scaffolds) != 0 :
-				known_lgs_dict[lg_id] = scaffolds
+				known_LGs_dict[lg_id] = scaffolds
 				scaffolds = []
 			lg_id = line.strip()[1:]
 		else :
@@ -432,22 +413,22 @@ def getKnownLinkageGroups(known_lg_file) :
 					scaffolds.append(tmp_line[0])
 					scaffolds_orientation_dict[tmp_line[0]] = tmp_line[1]
 	if len(scaffolds) != 0 :
-		known_lgs_dict[lg_id] = scaffolds
+		known_LGs_dict[lg_id] = scaffolds
 		scaffolds = []
 	fLG.close()
 	print embedded_scaffolds_dict
 	print scaffolds_orientation_dict
-	for key, value in known_lgs_dict.iteritems() :
-		print key, known_lgs_dict[key]
-	return known_lgs_dict, embedded_scaffolds_dict, scaffolds_orientation_dict
+	for key, value in known_LGs_dict.iteritems() :
+		print key, known_LGs_dict[key]
+	return known_LGs_dict, embedded_scaffolds_dict, scaffolds_orientation_dict
 
-def getNumVariantsForLG(num_markers_per_scaf_dict, scaffolds_list) :
+def getNumVariantsForLG(num_markers_per_chr_dict, scaffolds_list) :
 	num_variant_sites_per_lg = 0
 	for i in range(len(scaffolds_list)) :
 		#if scaffolds_list[i] in global_scaffolds :
-		for each_scaffold in num_markers_per_scaf_dict.iterkeys() :
+		for each_scaffold in num_markers_per_chr_dict.iterkeys() :
 			if scaffolds_list[i] == each_scaffold :
-				num_variant_sites_per_lg += num_markers_per_scaf_dict[each_scaffold]
+				num_variant_sites_per_lg += num_markers_per_chr_dict[each_scaffold]
 	return num_variant_sites_per_lg
 
 # prepare genotypes file for phasing program #
@@ -477,7 +458,7 @@ def prepare_gtyps_for_Phasing(alleles_dict, samples, scaffolds_list, outfile_han
 		outfile_handle.write("\n")
 	outfile_handle.close()
 
-def prepare_inputs_for_beagle(alleles_dict, samples, scaffolds_list, outfile, embedded_scaffolds_dict, scaffolds_orientation_dict, num_markers_per_scaf_dict) :
+def prepare_inputs_for_beagle(alleles_dict, samples, scaffolds_list, outfile, embedded_scaffolds_dict, scaffolds_orientation_dict, num_markers_per_chr_dict) :
 	fOUT = open(outfile, 'w')
 	fOUT.write('I id')
 	for i in range(len(samples)) :
@@ -491,7 +472,7 @@ def prepare_inputs_for_beagle(alleles_dict, samples, scaffolds_list, outfile, em
 		if scaffolds_orientation_dict[scaffolds_list[i]] == '-' :
 			for j in range(len(samples)) :
 				tmp_alleles_dict[samples[j]+'\t'+scaffolds_list[i]] = alleles_dict[samples[j]+'\t'+scaffolds_list[i]][::-1]
-		for j in range(num_markers_per_scaf_dict[scaffolds_list[i]]) :
+		for j in range(num_markers_per_chr_dict[scaffolds_list[i]]) :
 			fOUT.write('M %s_%d' %(scaffolds_list[i], j))
 			for k in range(len(samples)) :
 				key = samples[k] + "\t" + scaffolds_list[i]
@@ -525,78 +506,93 @@ def outputter_variants(variants_dict, scaffolds_list, variants_outfile, scaffold
 				fINDELOUT.write("%s\t%s\n" %(scaffolds_list[i]+":"+str(tmp_pos_list[j]), variants_dict[scaffolds_list[i]+":"+str(tmp_pos_list[j])]))
 	fINDELOUT.close()
 
-# parsing command line #
+def timestamper() :
+	"""
+	generate a dash-separated time stamped string
+	"""
+	return datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+
+def make_dir_if_needed(dir) :
+	"""make a directory if necessary """
+	if not exists(dir) :
+		makedirs(dir)
+
 def command_parser() :
-	parser = argparse.ArgumentParser(description="parsing vcf file for multiple downstream analysis")
-	parser.add_argument("-analysis", metavar="STR", dest="module", choices=["parse_for_LinkageMapping", "parse_for_Phasing"], required=True, help="available analysis: parse_for_LinkageMapping, parse_for_Phasing")
-	parser.add_argument("-vcf", metavar="FILE", dest="vcf_file", required=True, help="vcf file generated from GATK, samtools, and other callers")
-	parser.add_argument("-out_prefix", metavar="OUTFILE_PREFIX", dest="out_prefix", required=True, help="output file of genotype tables in either MSTMAP or rQTL required format. Note that this table might be too big to directly be used for both MSTMAP and rQTL. By defualt, linkage mapping analysis will thin the table out. You can turn off the toggle by specifying option -nothin")
+	""" parsing command line """
+	parser = ArgumentParser(description="Parsing VCF file for multiple downstream analysis")
+	parser.add_argument("-analysis", metavar="STR", dest="analysis", choices=["prepare_mapping", "prepare_phasing"], required=True, help="available analysis: prepare_mapping, prepare_phasing")
+	parser.add_argument("-vcf", metavar="FILE", dest="vcf_file", required=True, help="VCF file generated from GATK")
+	parser.add_argument("-p", metavar="STR", dest="out_prefix", required=True, help="prefix of output genotype table file in either MSTMAP or rQTL required input format")
 
-	# add option group for analysis "parse_for_LinkageMapping"
-	parse_for_LinkageMapping_option_group = parser.add_argument_group("Options for \"parse_for_LinkageMapping\" analysis", "generate genotype tables that are ready for downstream MSTMAP and/or rQTL\n")
-	parse_for_LinkageMapping_option_group.add_argument("-nothin", dest="nothin_flag", action='store_true', help="if specified, the linkage_mapping analysis will not thin out the genotypes table. Not recommended if you have a big table")
-	parse_for_LinkageMapping_option_group.add_argument("-thin_mode", dest="thin_mode", choices=["sliding_window", "random"], default="sliding_window", help="specify how you want to thin your genotype table. Current version only supports sliding_window. Other modes are coming soon")
-	parse_for_LinkageMapping_option_group.add_argument("-gtyp_table_outformat", metavar="STR", dest="gtyp_table_outformat", choices=["mstmap", "rqtl", "both"], type=str, default="both", help="specify the format of the output genotype table. Current version supports: mstmap, rqtl, and both. By default, both formats will be generated")
+	# add option group for analysis "prepare_mapping"
+	prepare_mapping_args_group = parser.add_argument_group("Options for \"prepare_mapping\" analysis", "generate genotype tables that are ready for downstream MSTMAP and/or rQTL\n")
+	prepare_mapping_args_group.add_argument("-thinoff", dest="thin_or_not", action='store_true', help="turn off thining the genotype table. Not suggested if you get a big table")
+	#prepare_mapping_args_group.add_argument("-thin_mode", dest="thin_mode", choices=["sliding_window", "random"], default="sliding_window", help="specify how you want to thin your genotype table. Current version only supports sliding_window. Other modes are coming soon")
+	prepare_mapping_args_group.add_argument("-gt_outfmt", metavar="STR", dest="gt_outfmt", choices=["mstmap", "rqtl", "both"], type=str, default="both", help="specify the format of the output genotype table. Current version supports: mstmap, rqtl, and both. By default, genotype tables in both formats will be generated")
+	prepare_mapping_args_group.add_argument("-gt_proposal", metavar="FILE", dest="gt_proposal_file", help="file of genotypes proposed at variant sites")
 
-	# add option group for analysis "parse_for_Phasing"
-	parse_for_Phasing_option_group = parser.add_argument_group("Options for \"parse_for_Phaing\" analysis", "generate genotype file for downstream Phasing programs\n")
-	parse_for_Phasing_option_group.add_argument("-known_lg", metavar="FILE", dest="known_lg_file", help="a file of a set of known linkage groups. If available, the output file generated for phasing program will be categorized by linkage group.")
-	parse_for_Phasing_option_group.add_argument("-phasing_outformat", metavar="STR", dest="phasing_outformat", choices=["fastphase", "beagle"], type=str, default="fastphase", help="specify the format of the output genotype file for the following Phasing programs. Current version supports: fastphase, beagle.")
+	# add option group for analysis "prepare_phasing"
+	prepare_phasing_args_group = parser.add_argument_group("Options for \"prepare_phasing\" analysis", "generate genotype file for downstream Phasing programs\n")
+	prepare_phasing_args_group.add_argument("-known_LGs", metavar="FILE", dest="known_LGs_file", help="a file of a set of known linkage groups. If available, the output file generated for phasing program will be categorized by linkage group")
+	prepare_phasing_args_group.add_argument("-phasing_outfmt", metavar="STR", dest="phasing_outfmt", choices=["fastphase", "beagle"], type=str, default="fastphase", help="specify the format of the output genotype file for the following Phasing programs. Current version supports: fastphase, beagle")
 
 	args = parser.parse_args()
 
 	# make sure vcf file provided exist #
-	if not os.path.exists(args.vcf_file) :
-		print "Error: cannot find the vcf file you provided: %s" %(args.vcf_file)
-		sys.exit(1)
+	if not exists(args.vcf_file) :
+		stderr.write(timestamper() + " [IO Error]: Cannot find the vcf file you provided %s\n" %(args.vcf_file))
+		exit()
 
 	# make sure the output path provided is reachable #
-	if not os.path.exists(args.out_prefix.rstrip(os.path.basename(args.out_prefix))) :
-		os.makedirs(args.out_prefix.rstrip(os.path.basename(args.out_prefix)))
+	make_dir_if_needed(dirname(realpath(args.out_prefix)))
 
-	if args.module == "parse_for_LinkageMapping" :
-		run_parse_for_LinkageMapping(args.module, args.vcf_file, args.out_prefix, args.gtyp_table_outformat, args.nothin_flag)
-	elif args.module == "parse_for_Phasing" :
-		run_parse_for_Phasing(args.module, args.vcf_file, args.known_lg_file, args.out_prefix, args.phasing_outformat)
+	if args.analysis == "prepare_mapping" :
+		run_prepare_mapping(args.analysis, args.vcf_file, args.gt_proposal_file, realpath(args.out_prefix), args.gt_outfmt, args.thin_or_not)
+	elif args.analysis == "prepare_phasing" :
+		run_prepare_phasing(args.analysis, args.vcf_file, args.known_LGs_file, realpath(args.out_prefix), args.phasing_outfmt)
 
-def run_parse_for_LinkageMapping(module, vcf_file, out_prefix, gtyp_table_outformat, nothin_flag) :
-	print "###################################################################"
-	print "#Analysis: %s" %(module)
-	print "#VCF: %s" %(vcf_file)
-	print "#Genotype Table output: %s" %(out_prefix)
-	print "#Ouput Format: %s" %(gtyp_table_outformat)
-	if nothin_flag :
-		print "#Thin the Table: No"
+def run_prepare_mapping(module, vcf_file, gt_proposal_file, out_prefix, gt_outfmt, thin_or_not) :
+	stdout.write("###################################################################\n")
+	stdout.write("#Analysis: %s\n" %(module))
+	stdout.write("#VCF: %s\n" %(vcf_file))
+	stdout.write("#Genotype Table output: %s\n" %(out_prefix))
+	stdout.write("#Ouput Format: %s\n" %(gt_outfmt))
+	if thin_or_not :
+		stdout.write("#Thin the Table: No\n")
 	else :
-		print "#Thin the Table: Yes"
-	print "###################################################################"
-	gt_dict, samples, num_markers_per_scaf_dict, num_variant_sites = VCF_Parser(vcf_file)
-	if gtyp_table_outformat == "both" :
-		outputter_gt_table(gt_dict, samples, num_variant_sites, out_prefix, "mstmap", 0)
-		outputter_gt_table(gt_dict, samples, num_variant_sites, out_prefix, "rqtl", 0)
-	else :
-		outputter_gt_table(gt_dict, samples, num_variant_sites, out_prefix, gtyp_table_outformat, 0)
-	if not nothin_flag :
-		thinned_gt_table_dict, num_variant_sites_after_thinning = thinning_genotyp_table(gt_dict, num_markers_per_scaf_dict, num_variant_sites, out_prefix, gtyp_table_outformat)
-		if gtyp_table_outformat == "both" :
+		stdout.write("#Thin the Table: Yes\n")
+	stdout.write("###################################################################\n")
+	gt_dict, samples, num_markers_per_chr_dict, num_variant_sites = prepare_genotype_for_mapping(vcf_file, gt_proposal_file)
+	if not thin_or_not :
+		thinned_gt_table_dict, num_variant_sites_after_thinning = thinning_genotyp_table(gt_dict, num_markers_per_chr_dict, num_variant_sites, out_prefix, gt_outfmt)
+		if gt_outfmt == "both" :
 			outputter_gt_table(thinned_gt_table_dict, samples, num_variant_sites_after_thinning, out_prefix, "mstmap", 1)
 			outputter_gt_table(thinned_gt_table_dict, samples, num_variant_sites_after_thinning, out_prefix, "rqtl", 1)
 		else :
-			outputter_gt_table(thinned_gt_table_dict, samples, num_variant_sites_after_thinning, out_prefix, gtyp_table_outformat, 1)
+			outputter_gt_table(thinned_gt_table_dict, samples, num_variant_sites_after_thinning, out_prefix, gt_outfmt, 1)
+	else :
+		if gt_outfmt == "both" :
+			outputter_gt_table(gt_dict, samples, num_variant_sites, out_prefix, "mstmap", 0)
+			outputter_gt_table(gt_dict, samples, num_variant_sites, out_prefix, "rqtl", 0)
+		else :
+			outputter_gt_table(gt_dict, samples, num_variant_sites, out_prefix, gt_outfmt, 0)
 
-def VCF_Parser(vcf_file) :
-	proposed_genotypes_from_RPGC_file = "/N/dc/projects/simozhan/rpgc/c_elegan/split_loci/summary/non_tandem_splitted_loci.proposed_genotypes"
+def prepare_genotype_for_mapping(vcf_file, gt_proposal_file = None) :
 	proposed_genotypes_from_RPGC = {}
-	fRPGC = open(proposed_genotypes_from_RPGC_file, 'r')
-	for line in fRPGC :
-		tmp_line = re.split('\t', line.strip())
-		chrom_id = tmp_line[0]
-		variant_pos = tmp_line[1]
-		site = chrom_id + ':' + variant_pos
-		proposed_genotypes_from_RPGC[site] = "\t".join(tmp_line[2:])
+	if gt_proposal_file :
+		stdout.write("Reading proposed genotypes from %s\n" %(gt_proposal_file))
+		fRPGC = open(gt_proposal_file, 'r')
+		for line in fRPGC :
+			tmp_line = re.split('\t', line.strip())
+			chrom_id = tmp_line[0]
+			variant_pos = tmp_line[1]
+			site = chrom_id + ':' + variant_pos
+			proposed_genotypes_from_RPGC[site] = "\t".join(tmp_line[2:])
+		fRPGC.close()
 
+	stdout.write("Reading VCF file %s\n" %(vcf_file))
 	samples = []
-	num_markers_per_scaf_dict = {}
+	num_markers_per_chr_dict = {}
 	genotypes_dict = {}
 	chrom_id, last_chrom_id = "", ""
 	num_variant_sites_per_chrom, num_variant_sites = 0, 0
@@ -614,7 +610,7 @@ def VCF_Parser(vcf_file) :
 				last_chrom_id = chrom_id
 			else :
 				if last_chrom_id != chrom_id :
-					num_markers_per_scaf_dict[last_chrom_id] = num_variant_sites_per_chrom
+					num_markers_per_chr_dict[last_chrom_id] = num_variant_sites_per_chrom
 					num_variant_sites_per_chrom = 0
 					last_chrom_id = chrom_id
 			variant_pos = tmp_line[1]
@@ -626,7 +622,6 @@ def VCF_Parser(vcf_file) :
 			if proposed_genotypes_from_RPGC.has_key(site) :
 				samples_genotypes = proposed_genotypes_from_RPGC[site]
 				site_type = "proposed"
-				print samples_genotypes
 			else :
 				samples_genotypes = '\t'.join(tmp_line[9:])
 				site_type = "original"
@@ -669,49 +664,44 @@ def VCF_Parser(vcf_file) :
 						genotypes_dict[sample] = [tmp_genotypes_dict[sample]]
 					else :
 						genotypes_dict[sample].append(tmp_genotypes_dict[sample])
-	num_markers_per_scaf_dict[last_chrom_id] = num_variant_sites_per_chrom
+	num_markers_per_chr_dict[last_chrom_id] = num_variant_sites_per_chrom
 	fVCF.close()
-	print "number of informative markers: %d" %(num_informative_markers)
-	print num_markers_per_scaf_dict
-	tmp = 0
-	for key, value in num_markers_per_scaf_dict.iteritems() :
-	#	print key, value
-		tmp += value
-	print tmp, num_variant_sites
-	return genotypes_dict, samples, num_markers_per_scaf_dict, num_variant_sites
+	stdout.write("\t%d variants parsed\n" %(num_informative_markers))
 
-def run_parse_for_Phasing(module, vcf_file, known_lg_file, out_prefix, phasing_outformat) :
-	print "###################################################################"
-	print "#Analysis: %s" %(module)
-	print "#VCF: %s" %(vcf_file)
-	print "#output prefix: %s" %(out_prefix)
-	print "#Ouput Format: %s" %(phasing_outformat)
-	print "###################################################################"
-	alleles_dict, variants_dict, samples, num_markers_per_scaf_dict, num_variant_sites = Genotypes_Parser(vcf_file, module)
-	known_lgs_dict, embedded_scaffolds_dict = {}, {}
+	return genotypes_dict, samples, num_markers_per_chr_dict, num_variant_sites
+
+def run_prepare_phasing(module, vcf_file, known_LGs_file, out_prefix, phasing_outfmt) :
+	stdout.write("###################################################################\n")
+	stdout.write("#Analysis: %s\n" %(module))
+	stdout.write("#VCF: %s\n" %(vcf_file))
+	stdout.write("#output prefix: %s\n" %(out_prefix))
+	stdout.write("#Ouput Format: %s\n" %(phasing_outfmt))
+	stdout.write("###################################################################\n")
+	alleles_dict, variants_dict, samples, num_markers_per_chr_dict, num_variant_sites = Genotypes_Parser(vcf_file, module)
+	known_LGs_dict, embedded_scaffolds_dict = {}, {}
 	outfile = ""
-	if known_lg_file != "" :
-		known_lgs_dict, embedded_scaffolds_dict, scaffolds_orientation_dict = getKnownLinkageGroups(known_lg_file)
-		for each_lg, scaffolds_list in known_lgs_dict.iteritems() :
+	if known_LGs_file != "" :
+		known_LGs_dict, embedded_scaffolds_dict, scaffolds_orientation_dict = getKnownLinkageGroups(known_LGs_file)
+		for each_lg, scaffolds_list in known_LGs_dict.iteritems() :
 			#if each_lg == "lg_5" :
-			num_variant_sites_per_lg = getNumVariantsForLG(num_markers_per_scaf_dict, scaffolds_list)
+			num_variant_sites_per_lg = getNumVariantsForLG(num_markers_per_chr_dict, scaffolds_list)
 			print each_lg, num_variant_sites_per_lg
 			variants_outfile = out_prefix + "%s.variants" %(each_lg)
 			outputter_variants(variants_dict, scaffolds_list, variants_outfile, scaffolds_orientation_dict)
-			if phasing_outformat == "fastphase" :
+			if phasing_outfmt == "fastphase" :
 				outfile = out_prefix + "%s.inp" %(each_lg)
 				fOUT = open(outfile, 'w')
 				fOUT.write("%d\n" %(len(samples)))
 				fOUT.write("%d\n" %(num_variant_sites_per_lg))
 				prepare_gtyps_for_Phasing(alleles_dict, samples, scaffolds_list, fOUT, embedded_scaffolds_dict, scaffolds_orientation_dict)
-			elif phasing_outformat == "beagle" :
+			elif phasing_outfmt == "beagle" :
 				outfile = out_prefix + "%s.bgl.unphased" %(each_lg)
-				prepare_inputs_for_beagle(alleles_dict, samples, scaffolds_list, outfile, embedded_scaffolds_dict, scaffolds_orientation_dict, num_markers_per_scaf_dict)
+				prepare_inputs_for_beagle(alleles_dict, samples, scaffolds_list, outfile, embedded_scaffolds_dict, scaffolds_orientation_dict, num_markers_per_chr_dict)
 	else :
-		if phasing_outformat == "fastphase" :
+		if phasing_outfmt == "fastphase" :
 			OUTFILE = Out_prefix + ".inp"
 		scaffolds_list = []
-		for each_scaffold in num_markers_per_scaf_dict.iterkeys() :
+		for each_scaffold in num_markers_per_chr_dict.iterkeys() :
 			scaffolds_list.append(each_scaffold)
 		fOUT = open(outfile, 'w')
 		fOUT.write("%d\n" %(len(samples)))
