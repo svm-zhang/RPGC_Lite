@@ -104,7 +104,7 @@ if __name__ == "__main__" :
 	args = parser.parse_args()
 
 	if not exists(realpath(args.vcf_file)) :
-		stderr.write(time_stamper() + " Error: cannot find the file you provided: %s" %(realpath(args.vcf_file)))
+		stderr.write(time_stamper() + " Error: cannot find the file you provided: %s\n" %(realpath(args.vcf_file)))
 		exit()
 
 	make_dir_if_needed(dirname(realpath(args.outprefix_training_file)))
