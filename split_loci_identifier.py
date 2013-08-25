@@ -1,42 +1,41 @@
-# The script is used to identify falsely splitted loci of a given assembly using alignment, genotype information, coverage, and insert size #
-
-import os, sys
 import re
-import argparse
+from argparse import ArgumentParser
+from os import makedirs, stat, system
+from os.path import join, exists, dirname, realpath
+from sys import exit, stdout, stderr
+from datetime import datetime
 
-# get a set of pairs of loci to be candidates of falsely splitted loci, given an alignment of an assembly against itself #
-#def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_sample_bam_file, loci_wide_pileups_dir, markers_wide_pileups_dir, splitted_sample_bam_dir, variants_dict, samples, assembled_genome_dict) :
-def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_sample_bam_file, out_dir, splitted_sample_bam_dir, variants_dict, samples, smt_genotype_dict, assembled_genome_dict) :
+def identify_splited_loci(alignment_file, assembled_genome_file, all_sample_bam_file, out_dir, splitted_sample_bam_dir, variants_dict, samples, smt_genotype_dict, assembled_genome_dict, min_aln_len, min_idn) :
+	"""
+	get a set of pairs of loci to be candidates of falsely splitted loci, given an alignment of an assembly against itself
+	"""
 
-	# setting up sub-directories for pileups		  #
-	# 1. pileups around markers						  #
-	# 2. pileups of a pair of splitted loci candidate #
-	pileups_dir = os.path.join(out_dir, "pileups")
-	markers_wide_pileups_dir = os.path.join(pileups_dir, "markers_wide")
-	loci_wide_pileups_dir = os.path.join(pileups_dir, "loci_wide")
-	if not os.path.exists(markers_wide_pileups_dir) :
-		os.makedirs(markers_wide_pileups_dir)
-	if not os.path.exists(loci_wide_pileups_dir) :
-		os.makedirs(loci_wide_pileups_dir)
+	stdout.write(timestamper() + " Identifying splitted loci candidates\n")
+	"""
+	setting up sub-directories for pileups
+	1. pileups around markers
+	2. pileups of a pair of splitted loci candidate
+	"""
+	pileups_dir = join(out_dir, "pileups")
+	markers_wide_pileups_dir = join(pileups_dir, "markers_wide")
+	loci_wide_pileups_dir = join(pileups_dir, "loci_wide")
+	make_dirs_if_needed(markers_wide_pileups_dir, loci_wide_pileups_dir)
 
 	# setting up sub-directory for sequences #
 	# sequences of pairs of splitted loci candidates with(out) markers #
-	seqs_dir = os.path.join(out_dir, "seqs")
-	if not os.path.exists(seqs_dir) :
-		os.makedirs(seqs_dir)
-	splitted_loci_with_markers_seq_outfile = os.path.join(seqs_dir, "splitted_loci_with_markers.fasta")
-	splitted_loci_without_markers_seq_outfile = os.path.join(seqs_dir, "splitted_loci_without_markers.fasta")
+	seqs_dir = join(out_dir, "seqs")
+	make_dirs_if_needed(seqs_dir)
+	splitted_loci_with_markers_seq_outfile = join(seqs_dir, "splitted_loci_with_markers.fasta")
+	splitted_loci_without_markers_seq_outfile = join(seqs_dir, "splitted_loci_without_markers.fasta")
 	fSEQ_LOCI_MARKER = open(splitted_loci_with_markers_seq_outfile, 'w')
 	fSEQ_LOCI_NO_MARKER = open(splitted_loci_without_markers_seq_outfile, 'w')
 
 	# setting up subdirectory for summary #
-	summary_dir = os.path.join(out_dir, "summary")
-	if not os.path.exists(summary_dir) :
-		os.makedirs(summary_dir)
-	proposed_genotypes_outfile = os.path.join(summary_dir, "non_tandem_splitted_loci.proposed_genotypes")
+	summary_dir = join(out_dir, "summary")
+	make_dirs_if_needed(summary_dir)
+	proposed_genotypes_outfile = join(summary_dir, "non_tandem_splitted_loci.proposed_genotypes")
 	fProPose = open(proposed_genotypes_outfile, 'w')
 
-	threshold_len_alignment, threshold_identity_alignment = 1000, 0.9
 	num_potentials = 0
 	potential_dup_loci = []					# a list of pairs of loci that are potentially falsely splitted loci #
 	all_splitted_loci_dict = {}
@@ -60,9 +59,9 @@ def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_samp
 		q_end = int(tmp_line[3]) + 1
 		total_num_loci += 1
 		if q_start > t_end or t_start > q_end :
-			################################################################
-			# get the length and the identity of the alignment using CIGAR #
-			################################################################
+			"""
+			get the length and the identity of the alignment using CIGAR
+			"""
 			cigar = tmp_line[10:]
 			i, len_alignment, num_matches = 0, 0, 0
 			while i < len(cigar) :
@@ -76,7 +75,7 @@ def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_samp
 					len_alignment += int(cigar[i])
 				i += 1
 			identity_alignment = float(num_matches) / len_alignment
-			if len_alignment >= threshold_len_alignment and identity_alignment >= threshold_identity_alignment :		# apply alignment length and identity filters #
+			if len_alignment >= min_aln_len and identity_alignment >= min_idn :		# apply alignment length and identity filters #
 				t_id = tmp_line[5]
 				q_id = tmp_line[1]
 				one_locus = "%s:%d-%d" %(t_id, t_start, t_end)
@@ -87,38 +86,37 @@ def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_samp
 				if not all_splitted_loci_dict.has_key(the_other_locus+'|'+one_locus) :
 					all_splitted_loci_dict[one_locus+'|'+the_other_locus] = 1
 					num_loci_passed_len_idn_filter += 1
-					print ">", one_locus, the_other_locus
-					#########################
-					# apply coverage filter #
-					#########################
+					stdout.write("> %s %s\n" %(one_locus, the_other_locus))
+					"""
+					apply coverage filter
+					"""
 					proposed_genotype_at_variant_site = {}
 					tmp_one_locus = re.sub(':', '-', re.sub('_', '', one_locus))
-					one_locus_pileups_out = os.path.join(loci_wide_pileups_dir, tmp_one_locus+".pileups")
+					one_locus_pileups_out = join(loci_wide_pileups_dir, tmp_one_locus+".pileups")
 					tmp_the_other_locus = re.sub(':', '-', re.sub('_', '', the_other_locus))
-					the_other_locus_pileups_out = os.path.join(loci_wide_pileups_dir, tmp_the_other_locus+".pileups")
-					pass_or_filter = Applying_Cov_Filter(one_locus, the_other_locus, assembled_genome_file, all_sample_bam_file, one_locus_pileups_out, the_other_locus_pileups_out)
+					the_other_locus_pileups_out = join(loci_wide_pileups_dir, tmp_the_other_locus+".pileups")
+					pass_or_filter = apply_cov_filter(one_locus, the_other_locus, assembled_genome_file, all_sample_bam_file, one_locus_pileups_out, the_other_locus_pileups_out)
 					if pass_or_filter :
-						###########################################
-						# Localizing markers in each pair of loci #
-						###########################################
-						variants_in_one_locus = Localize_Markers_in_Locus(t_id, t_start, t_end, t_strand, variants_dict, smt_genotype_dict)
-						variants_in_the_other_locus = Localize_Markers_in_Locus(q_id, q_start, q_end, q_strand, variants_dict, smt_genotype_dict)
+						"""
+						localizing markers in each pair of loci
+						"""
+						variants_in_one_locus = localize_markers_in_loci(t_id, t_start, t_end, t_strand, variants_dict, smt_genotype_dict)
+						variants_in_the_other_locus = localize_markers_in_loci(q_id, q_start, q_end, q_strand, variants_dict, smt_genotype_dict)
 
-						#############################################
-						# Find each pair of markers in each of loci #
-						#############################################
+						"""
+						find each pair of markers in each of loci
+						"""
 						variant_pairs = []
 						if len(variants_in_one_locus) > 0 :
 							one_or_the_other = 0
-							variant_pairs += Get_Variant_pair_in_Splitted_Loci_Candidates(t_id, t_start, t_end, t_strand, q_id, q_start, q_end, q_strand, one_or_the_other, variants_in_one_locus, cigar, variants_dict, assembled_genome_dict)
+							variant_pairs += get_variant_pair_in_splitted_loci_Candidates(t_id, t_start, t_end, t_strand, q_id, q_start, q_end, q_strand, one_or_the_other, variants_in_one_locus, cigar, variants_dict, assembled_genome_dict)
 						if len(variants_in_the_other_locus) > 0 :
 							one_or_the_other = 1
-							variant_pairs += Get_Variant_pair_in_Splitted_Loci_Candidates(q_id, q_start, q_end, q_strand, t_id, t_start, t_end, t_strand, one_or_the_other, variants_in_the_other_locus, cigar, variants_dict, assembled_genome_dict)
+							variant_pairs += get_variant_pair_in_splitted_loci_Candidates(q_id, q_start, q_end, q_strand, t_id, t_start, t_end, t_strand, one_or_the_other, variants_in_the_other_locus, cigar, variants_dict, assembled_genome_dict)
 
-						##############################################
-						# Creating a database of variants that are   #
-						# identified in each pair of loci candidates #
-						##############################################
+						"""
+						 Creating a database of variants that are identified in each pair of loci candidates #
+						"""
 						for i in range(len(variant_pairs)) :
 							tmp_pair = re.split('\|', variant_pairs[i])
 							for j in range(len(tmp_pair)) :
@@ -136,11 +134,11 @@ def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_samp
 							if q_strand == '+' :
 								fSEQ_LOCI_MARKER.write(">%s_%d_%d_2\n%s\n" %(q_id, q_start, q_end, assembled_genome_dict[q_id][q_start-1:q_end]))
 							else :
-								fSEQ_LOCI_MARKER.write(">%s_%d_%d_2\n%s\n" %(q_id, q_start, q_end, RC(assembled_genome_dict[q_id][q_end-1:q_start])))
-							loci_candidate_out_subdir = os.path.join(markers_wide_pileups_dir, "%s_%d_%d-%s_%d_%d" %(t_id, t_start, t_end, q_id, q_start, q_end))
-							if not os.path.exists(loci_candidate_out_subdir) :
-								os.makedirs(loci_candidate_out_subdir)
-							proposed_genotype_at_variant_site = Genotypes_Investigation(variant_pairs, variants_dict, samples, loci_candidate_out_subdir, splitted_sample_bam_dir, assembled_genome_file)
+								fSEQ_LOCI_MARKER.write(">%s_%d_%d_2\n%s\n" %(q_id, q_start, q_end, rc(assembled_genome_dict[q_id][q_end-1:q_start])))
+							loci_candidate_out_subdir = join(markers_wide_pileups_dir, "%s_%d_%d-%s_%d_%d" %(t_id, t_start, t_end, q_id, q_start, q_end))
+							if not exists(loci_candidate_out_subdir) :
+								make_dirs_if_needed(loci_candidate_out_subdir)
+							proposed_genotype_at_variant_site = investigate_genotypes(variant_pairs, variants_dict, samples, loci_candidate_out_subdir, splitted_sample_bam_dir, assembled_genome_file)
 							if proposed_genotype_at_variant_site != None :
 								print "\tproposed genotype:", proposed_genotype_at_variant_site
 								predicted_falsely_splitted_loci.append("%s|%s" %(one_locus, the_other_locus))
@@ -154,21 +152,20 @@ def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_samp
 										fProPose.write("%s\t%s\t%s\n" %(tmp_id, tmp_pos, '\t'.join(proposed_genotype_at_variant_site[variant])))
 							else :
 								num_pairs_loci_predicted_correctly_splitted_loci += 1
-							print "\tnumber of pairs of variants can be localized:", num_localized_variants
-							#print "\tdatabase", variants_in_loci_candidates_db
+							stdout.write("\tnumber of pairs of variants can be localized: %d\n" %(num_localized_variants))
 						else :
 							loci_without_markers_localized.append("%s|%s" %(one_locus, the_other_locus))
 							fSEQ_LOCI_NO_MARKER.write(">%s_%d_%d_1\n%s\n" %(t_id, t_start, t_end, assembled_genome_dict[t_id][t_start-1:t_end]))
 							if q_strand == '+' :
 								fSEQ_LOCI_NO_MARKER.write(">%s_%d_%d_2\n%s\n" %(q_id, q_start, q_end, assembled_genome_dict[q_id][q_start-1:q_end]))
 							else :
-								fSEQ_LOCI_NO_MARKER.write(">%s_%d_%d_2\n%s\n" %(q_id, q_start, q_end, RC(assembled_genome_dict[q_id][q_end-1:q_start])))
+								fSEQ_LOCI_NO_MARKER.write(">%s_%d_%d_2\n%s\n" %(q_id, q_start, q_end, rc(assembled_genome_dict[q_id][q_end-1:q_start])))
 							num_loci_with_no_localized_variants += 1
 					else :
 						num_loci_failed_cov_filter += 1
-						print "\tfailed the coverage filter", one_locus, the_other_locus
-						os.system("rm %s" %(one_locus_pileups_out))
-						os.system("rm %s" %(the_other_locus_pileups_out))
+						stdout.write("\tfailed the coverage filter: %s %s\n" %(one_locus, the_other_locus))
+						system("rm %s" %(one_locus_pileups_out))
+						system("rm %s" %(the_other_locus_pileups_out))
 	fALIGN.close()
 
 	# for each loci without localized markers, we try to use the loci with markers to help #
@@ -186,10 +183,10 @@ def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_samp
 	#			if variants_in_loci_candidates_db[tmp_id] >= tmp_start and variants_in_loci_candidates_db[tmp_id] <= tmp_end :
 	#				print "found", tmp_pair[j], variants_in_loci_candidates_db[tmp_id]
 
-	print "#########################################################"
+	print ""
 	print "predicted splitted loci", predicted_falsely_splitted_loci
 	print "variants database", variants_in_loci_candidates_db
-	out_summary_file = os.path.join(summary_dir, "splitted_loci_identification.summary")
+	out_summary_file = join(summary_dir, "splitted_loci_identification.summary")
 	fSummary = open(out_summary_file, 'w')
 	fSummary.write("total number of loci in the alignment: %d\n" %(total_num_loci))
 	fSummary.write("number of loci alignment having at least 1000 bp long and 90%% identity: %d\n" %(num_loci_passed_len_idn_filter))
@@ -199,26 +196,17 @@ def Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_samp
 	fSummary.write("among these predicted splitted loci, %d of them are non tandem ones, while %d are tandems\n" %(num_pairs_predicted_falsely_non_tandem_splitted_loci, num_pairs_predicted_falsely_splitted_loci-num_pairs_predicted_falsely_non_tandem_splitted_loci))
 	fSummary.write("total number of pairs of markers being localized in falsely splitted loci: %d\n" %(num_localized_variants))
 
-	# if verbose, I should output this to stdout #
-	#print "total number of loci in the alignment:", total_num_loci
-	#print "number of loci alignment having at least 1000 bp long and 90% identity:", num_loci_passed_len_idn_filter
-	#print "number of loci alignment who passed the length and identity filter failing to pass the coverage filter:", num_loci_failed_cov_filter
-	#print "number of loci alignment who passed all three filters having no localized variants:", num_loci_with_no_localized_variants
-	#print "number of pairs of loci being identified as falsely splitted loci: %d" %(num_pairs_predicted_falsely_splitted_loci)
-	#print "among these predicted splitted loci, %d of them are non tandem ones, while %d are tandems" %(num_pairs_predicted_falsely_non_tandem_splitted_loci, num_pairs_predicted_falsely_splitted_loci-num_pairs_predicted_falsely_non_tandem_splitted_loci)
-	#print "total number of markers being localized in falsely splitted loci:", num_localized_variants
 	return potential_dup_loci, cigar_dict
 
-def Pileups_Generator(region, assembled_genome_file, bam_file, individual_sample_or_all, pileups_outfile) :
+def generate_pileups(region, assembled_genome_file, bam_file, individual_sample_or_all, pileups_outfile) :
 	if individual_sample_or_all == "all" :
 		pileups_cmd = "samtools mpileup -d 9999 -f %s -r %s %s > %s" %(assembled_genome_file, region, bam_file, pileups_outfile)
 	else :
 		pileups_cmd = "samtools mpileup -f %s -r %s %s > %s" %(assembled_genome_file, region, bam_file, pileups_outfile)
-	#print pileups_cmd
-	os.system(pileups_cmd)
+	system(pileups_cmd)
 
 # Given a pileup file of a region, the function gives you the median coverage #
-def Compute_Regional_Median_Coverage(pileups_file) :
+def get_regional_median_coverage(pileups_file) :
 	covs = []
 	median_cov = 0.0
 	fPILEUP = open(pileups_file, 'r')
@@ -234,38 +222,35 @@ def Compute_Regional_Median_Coverage(pileups_file) :
 			median_cov = sort_covs[len(sort_covs)/2]
 	return median_cov
 
-def Applying_Cov_Filter(one_locus, the_other_locus, assembled_genome_file, all_sample_bam_file, one_locus_pileups_out, the_other_locus_pileups_out) :
-	Pileups_Generator(one_locus, assembled_genome_file, all_sample_bam_file, "all", one_locus_pileups_out)
-	Pileups_Generator(the_other_locus, assembled_genome_file, all_sample_bam_file, "all", the_other_locus_pileups_out)
-	if os.stat(one_locus_pileups_out).st_size == 0 and os.stat(the_other_locus_pileups_out).st_size == 0 :
-		print "no coverage in both loci", one_locus_pileups_out, the_other_locus_pileups_out
-		os.system("rm %s" %(one_locus_pileups_out))
-		os.system("rm %s" %(the_other_locus_pileups_out))
+def apply_cov_filter(one_locus, the_other_locus, assembled_genome_file, all_sample_bam_file, one_locus_pileups_out, the_other_locus_pileups_out) :
+	generate_pileups(one_locus, assembled_genome_file, all_sample_bam_file, "all", one_locus_pileups_out)
+	generate_pileups(the_other_locus, assembled_genome_file, all_sample_bam_file, "all", the_other_locus_pileups_out)
+	if stat(one_locus_pileups_out).st_size == 0 and os.stat(the_other_locus_pileups_out).st_size == 0 :
+		stdout.write("no pileups generated for both loci: %s %s\n" %(one_locus_pileups_out, the_other_locus_pileups_out))
+		system("rm %s" %(one_locus_pileups_out))
+		system("rm %s" %(the_other_locus_pileups_out))
 		return 0
 	else :
-		median_cov_one_locus = Compute_Regional_Median_Coverage(one_locus_pileups_out)
-		median_cov_the_other_locus = Compute_Regional_Median_Coverage(the_other_locus_pileups_out)
-		print "\t", median_cov_one_locus, median_cov_the_other_locus
+		median_cov_one_locus = get_regional_median_coverage(one_locus_pileups_out)
+		median_cov_the_other_locus = get_regional_median_coverage(the_other_locus_pileups_out)
+		stdout.write("\t %s %s\n" %(median_cov_one_locus, median_cov_the_other_locus))
+		""" hard choice, fix in the future """
 		if median_cov_one_locus + median_cov_the_other_locus < 600 :
 			return 1
 		else :
 			return 0
 
-# get the variants information for the given vcf file #
-######################
-# parse the VCF file #
-######################
-def VCF_Parser(vcf_file) :
-	print "parsing the vcf file ..."
+def get_genotypes(gatk_vcf_file, smt_genotypes_file) :
+	""" get the genotypes from a given VCF file """
+	stdout.write(timestamper() +  " Getting genotypes from VCf file %s\n" %(gatk_vcf_file))
 	samples = []
 	variants_dict = {}
 	num_variants = 0
-	fVCF = open(vcf_file, 'r')
-	for line in fVCF :
+	fGATK = open(gatk_vcf_file, 'r')
+	for line in fGATK :
 		if line.startswith('#') :
 			if line.startswith("#CHROM") :
 				samples = re.split('\t', line.strip())[9:]
-				print "\t%d" %(len(samples)), "parsed"
 		else :
 			tmp_line = re.split('\t', line.strip())
 			chrom_id = tmp_line[0]
@@ -287,20 +272,19 @@ def VCF_Parser(vcf_file) :
 							num_het += 1
 						tmp_dp_per_individual = int(re.split(':', genotypes[i])[2])
 						tmp_dp += tmp_dp_per_individual
-				#if tmp_num_individual/float(len(samples)) >= 0.85 :
-				#if num_het/float(tmp_num_individual) <= 0.05 :
 				if num_het <= 4 :
 					tmp_genotypes = '\t'.join(tmp_line[9:])
 					num_variants += 1
 					if not variants_dict.has_key(chrom_id+':'+chrom_pos) :
 						variants_dict[chrom_id+':'+chrom_pos] = "%s\t%s\t%s" %(ref_base, alt_base, tmp_genotypes)
 					else :				# there should not have any redundant calls #
-						print "redundant calls:", chrom_id, chrom_pos
-						sys.exit(1)
-	print "\t%d" %(num_variants), "variants parsed"
+						stderr.write(timestamper() + " redundant calls found: %s %s\n" %(chrom_id, chrom_pos))
+						stderr.write(timestamper() + " please run fix_redundant_calls.py first to solve the problem\n")
+						exit(1)
+	fGATK.close()
+	stdout.write(timestamper() + " genotypes of %d individuals at %d variant sites parsed\n" %(len(samples), num_variants))
 
 	# read in genotypes by samtools #
-	smt_genotypes_file = "/N/dc/projects/simozhan/rpgc/c_elegan/genotyping/assembly213/genotypes/multi_sm_1_70.smt.genotypes.final.vcf"
 	fSMT = open(smt_genotypes_file, 'r')
 	smt_genoytpe_dict = {}
 	for line in fSMT :
@@ -314,14 +298,13 @@ def VCF_Parser(vcf_file) :
 	fSMT.close()
 	return variants_dict, samples, smt_genoytpe_dict
 
-######################################################
-# Localize variants in the potentially splitted loci #
-######################################################
-# find markers within each of the identified potentially splitted loci #
-# for each pair of markers, define an interval whose pileup will be generated #
-#def Localize_Markers_in_Locus(split_loci_candidates, cigar_dict, variants_dict, assembled_genome_dict) :
-def Localize_Markers_in_Locus(locus_id, locus_start, locus_end, locus_strand, variants_dict, smt_genoytpe_dict) :
-	sys.stdout.write("\t%s|%d|%d|%s" %(locus_id, locus_start, locus_end, locus_strand))
+def localize_markers_in_loci(locus_id, locus_start, locus_end, locus_strand, variants_dict, smt_genoytpe_dict) :
+	"""
+	Localize variants in the potentially splitted loci #
+	find markers within each of the identified potentially splitted loci #
+	for each pair of markers, define an interval whose pileup will be generated #
+	"""
+	stdout.write("\t%s|%d|%d|%s" %(locus_id, locus_start, locus_end, locus_strand))
 	tmp_variants_in_locus = []
 	for variant, info in variants_dict.iteritems() :
 		chrom_id = re.split(':', variant)[0]
@@ -338,12 +321,12 @@ def Localize_Markers_in_Locus(locus_id, locus_start, locus_end, locus_strand, va
 		if smt_genoytpe_dict.has_key(tmp_variants_in_locus[i]) :
 			variants_in_locus.append(tmp_variants_in_locus[i])
 	if len(variants_in_locus) == 0 :
-		print "\tcannot find markers in the locus"
+		stdout.write("\tcannot find markers in the locus\n")
 	else :
 		print "\t", variants_in_locus
 	return variants_in_locus
 
-def Get_Variant_pair_in_Splitted_Loci_Candidates(one_locus_id, one_locus_start, one_locus_end, one_locus_strand, the_other_locus_id, the_other_locus_start, the_other_locus_end, the_other_locus_strand, one_or_the_other, variants_in_locus, cigar, variants_dict, assembled_genome_dict) :
+def get_variant_pair_in_splitted_loci_Candidates(one_locus_id, one_locus_start, one_locus_end, one_locus_strand, the_other_locus_id, the_other_locus_start, the_other_locus_end, the_other_locus_strand, one_or_the_other, variants_in_locus, cigar, variants_dict, assembled_genome_dict) :
 	variant_pairs = []
 	for i in range(len(variants_in_locus)) :
 		tmp_chrom_id = re.split(':', variants_in_locus[i])[0]
@@ -412,7 +395,7 @@ def Get_Variant_pair_in_Splitted_Loci_Candidates(one_locus_id, one_locus_start, 
 						return []
 				else :
 					variant_pos_the_other_locus = the_other_locus_start - relative_pos_in_the_other_locus - 1
-					if not RC(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-1]) in re.split('\t', variants_dict[variants_in_locus[i]])[0:2] :
+					if not rc(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-1]) in re.split('\t', variants_dict[variants_in_locus[i]])[0:2] :
 						return []
 			else :
 				variant_pos_the_other_locus = the_other_locus_start + relative_pos_in_the_other_locus
@@ -423,17 +406,17 @@ def Get_Variant_pair_in_Splitted_Loci_Candidates(one_locus_id, one_locus_start, 
 				if the_other_locus_strand == '+' :
 					print "\t>%s" %(the_other_locus_id+':'+str(variant_pos_the_other_locus)), "\t\t", assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-11:variant_pos_the_other_locus-1], assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-1], assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus:variant_pos_the_other_locus+10]
 				else :
-					print "\t>%s" %(the_other_locus_id+':'+str(variant_pos_the_other_locus)), "\t\t", RC(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus:variant_pos_the_other_locus+10]), RC((assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-1])), RC(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-11:variant_pos_the_other_locus-1])
+					print "\t>%s" %(the_other_locus_id+':'+str(variant_pos_the_other_locus)), "\t\t", rc(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus:variant_pos_the_other_locus+10]), rc((assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-1])), rc(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-11:variant_pos_the_other_locus-1])
 			else :
 				variant_pairs.append("%s:%s:%s|%s:%s:%s" %(the_other_locus_id, variant_pos_the_other_locus, the_other_locus_strand, one_locus_id, variant_pos_one_locus, one_locus_strand))
 				if one_locus_strand == '-' :
-					print "\t>%s" %(the_other_locus_id+":"+str(variant_pos_the_other_locus)), RC(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus:variant_pos_the_other_locus+5]), RC(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-1]), RC(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-6:variant_pos_the_other_locus-1])
+					print "\t>%s" %(the_other_locus_id+":"+str(variant_pos_the_other_locus)), rc(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus:variant_pos_the_other_locus+5]), rc(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-1]), rc(assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-6:variant_pos_the_other_locus-1])
 				else:
 					print "\t>%s" %(the_other_locus_id+":"+str(variant_pos_the_other_locus)), assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-6:variant_pos_the_other_locus-1], assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus-1], assembled_genome_dict[the_other_locus_id][variant_pos_the_other_locus:variant_pos_the_other_locus+5]
 				print "\t>%s" %(one_locus_id+":"+str(variant_pos_one_locus)), assembled_genome_dict[one_locus_id][variant_pos_one_locus-6:variant_pos_one_locus-1], assembled_genome_dict[one_locus_id][variant_pos_one_locus-1], assembled_genome_dict[one_locus_id][variant_pos_one_locus:variant_pos_one_locus+5]
 	return variant_pairs
 
-def Genotypes_Investigation(variant_pairs, variants_dict, samples, loci_candidate_out_subdir, splitted_sample_bam_dir, assembled_genome_file) :
+def investigate_genotypes(variant_pairs, variants_dict, samples, loci_candidate_out_subdir, splitted_sample_bam_dir, assembled_genome_file) :
 	num_variant_pair_with_expected_gt_pattern_between_loci = 0
 	proposed_genotype_at_variant_site = {}
 	for i in range(len(variant_pairs)) :
@@ -462,23 +445,23 @@ def Genotypes_Investigation(variant_pairs, variants_dict, samples, loci_candidat
 			alt_allele_the_other_locus = re.split('\t', variants_dict[the_other_locus_id+":"+str(marker_pos_the_other_locus)])[1]
 			print ref_allele_the_other_locus, alt_allele_the_other_locus, tmp_genoytpes
 			proposed_genotype_at_variant_site[the_other_locus_id+':'+str(marker_pos_the_other_locus)] = []
-		variant_pairs_out_subdir = os.path.join(loci_candidate_out_subdir, "%s_%d-%s_%d" %(one_locus_id, marker_pos_one_locus, the_other_locus_id, marker_pos_the_other_locus))
-		if not os.path.exists(variant_pairs_out_subdir) :
-			os.makedirs(variant_pairs_out_subdir)
+		variant_pairs_out_subdir = join(loci_candidate_out_subdir, "%s_%d-%s_%d" %(one_locus_id, marker_pos_one_locus, the_other_locus_id, marker_pos_the_other_locus))
+		if not exists(variant_pairs_out_subdir) :
+			makedirs(variant_pairs_out_subdir)
 		num_individual_with_expected_genotype_pattern = 0
 		tmp_num_individual = len(samples)
 		for j in range(len(samples)) :
 			individual_name = re.sub("rils", 'r', samples[j])
-			in_bam_file = os.path.join(splitted_sample_bam_dir, individual_name+".bam")
+			in_bam_file = join(splitted_sample_bam_dir, individual_name+".bam")
 			if variant_in_one_or_the_other == "one" :
-				individual_out_pileups = os.path.join(variant_pairs_out_subdir, samples[j]+"_%s_%d.pileups" %(the_other_locus_id, marker_pos_the_other_locus))
-				Pileups_Generator("%s:%d-%d" %(the_other_locus_id, marker_pos_the_other_locus-25, marker_pos_the_other_locus+25), assembled_genome_file, in_bam_file, "individual", individual_out_pileups)
-				genotype_the_other_locus, cov_the_other_locus, type_the_other_locus = Pileups_Analyzer(marker_pos_the_other_locus, individual_out_pileups)
+				individual_out_pileups = join(variant_pairs_out_subdir, samples[j]+"_%s_%d.pileups" %(the_other_locus_id, marker_pos_the_other_locus))
+				generate_pileups("%s:%d-%d" %(the_other_locus_id, marker_pos_the_other_locus-25, marker_pos_the_other_locus+25), assembled_genome_file, in_bam_file, "individual", individual_out_pileups)
+				genotype_the_other_locus, cov_the_other_locus, type_the_other_locus = analyze_pileups(marker_pos_the_other_locus, individual_out_pileups)
 				if the_other_locus_strand == "-" :
 					if genotype_the_other_locus != "./." and genotype_the_other_locus != "NA/NA" :
-						genotype_the_other_locus = RC(genotype_the_other_locus)
-				individual_out_pileups = os.path.join(variant_pairs_out_subdir, samples[j]+"_%s_%d.pileups" %(one_locus_id, marker_pos_one_locus))
-				genotype_one_locus, cov_one_locus, type_one_locus = Individual_Genotype_Analyzer(tmp_genoytpes[j], ref_allele_one_locus, alt_allele_one_locus)
+						genotype_the_other_locus = rc(genotype_the_other_locus)
+				individual_out_pileups = join(variant_pairs_out_subdir, samples[j]+"_%s_%d.pileups" %(one_locus_id, marker_pos_one_locus))
+				genotype_one_locus, cov_one_locus, type_one_locus = analyze_individual_genotype(tmp_genoytpes[j], ref_allele_one_locus, alt_allele_one_locus)
 				if genotype_one_locus == genotype_the_other_locus and cov_one_locus + cov_the_other_locus <= 7 and cov_one_locus + cov_the_other_locus > 0 :
 					print "\t\t***",samples[j], genotype_one_locus, cov_one_locus, genotype_the_other_locus, cov_the_other_locus, ":D"
 					num_individual_with_expected_genotype_pattern += 1
@@ -501,21 +484,21 @@ def Genotypes_Investigation(variant_pairs, variants_dict, samples, loci_candidat
 					else :
 						proposed_genotype_at_variant_site[one_locus_id+':'+str(marker_pos_one_locus)].append("1/1:%d" %(cov_the_other_locus))
 				elif genotype_the_other_locus == "NA/NA" or genotype_one_locus == "NA/NA" or (genotype_one_locus == "./." and genotype_the_other_locus == "./."):
-					print "\t\t***",samples[j], genotype_one_locus, cov_one_locus, genotype_the_other_locus, cov_the_other_locus, "what the hell"
+					print "\t\t***",samples[j], genotype_one_locus, cov_one_locus, genotype_the_other_locus, cov_the_other_locus
 					tmp_num_individual -= 1
 					proposed_genotype_at_variant_site[one_locus_id+':'+str(marker_pos_one_locus)].append("./.:0")
 				else :
 					print "\t\t***disagree",samples[j], genotype_one_locus, cov_one_locus, genotype_the_other_locus, cov_the_other_locus
 					proposed_genotype_at_variant_site[one_locus_id+':'+str(marker_pos_one_locus)].append("./.:0")
 			else :
-				individual_out_pileups = os.path.join(variant_pairs_out_subdir, samples[j]+"_%s_%d.pileups" %(one_locus_id, marker_pos_one_locus))
-				Pileups_Generator("%s:%d-%d" %(one_locus_id, marker_pos_one_locus-25, marker_pos_one_locus+25), assembled_genome_file, in_bam_file, "individual", individual_out_pileups)
-				genotype_one_locus, cov_one_locus, type_one_locus = Pileups_Analyzer(marker_pos_one_locus, individual_out_pileups)
+				individual_out_pileups = join(variant_pairs_out_subdir, samples[j]+"_%s_%d.pileups" %(one_locus_id, marker_pos_one_locus))
+				generate_pileups("%s:%d-%d" %(one_locus_id, marker_pos_one_locus-25, marker_pos_one_locus+25), assembled_genome_file, in_bam_file, "individual", individual_out_pileups)
+				genotype_one_locus, cov_one_locus, type_one_locus = analyze_pileups(marker_pos_one_locus, individual_out_pileups)
 				if the_other_locus_strand == "-" :
 					if genotype_one_locus != "./." and genotype_one_locus != "NA/NA" :
-						genotype_one_locus = RC(genotype_one_locus)
-				individual_out_pileups = os.path.join(variant_pairs_out_subdir, samples[j]+"_%s_%d.pileups" %(the_other_locus_id, marker_pos_the_other_locus))
-				genotype_the_other_locus, cov_the_other_locus, type_the_other_locus = Individual_Genotype_Analyzer(tmp_genoytpes[j], ref_allele_the_other_locus, alt_allele_the_other_locus)
+						genotype_one_locus = rc(genotype_one_locus)
+				individual_out_pileups = join(variant_pairs_out_subdir, samples[j]+"_%s_%d.pileups" %(the_other_locus_id, marker_pos_the_other_locus))
+				genotype_the_other_locus, cov_the_other_locus, type_the_other_locus = analyze_individual_genotype(tmp_genoytpes[j], ref_allele_the_other_locus, alt_allele_the_other_locus)
 				if genotype_one_locus == genotype_the_other_locus and cov_one_locus + cov_the_other_locus <= 7 and cov_one_locus + cov_the_other_locus > 0 :
 					print "\t\t***",samples[j], genotype_the_other_locus, cov_the_other_locus, genotype_one_locus, cov_one_locus, ":D"
 					num_individual_with_expected_genotype_pattern += 1
@@ -538,7 +521,7 @@ def Genotypes_Investigation(variant_pairs, variants_dict, samples, loci_candidat
 					else :
 						proposed_genotype_at_variant_site[the_other_locus_id+':'+str(marker_pos_the_other_locus)].append("1/1:%d" %(cov_the_other_locus))
 				elif genotype_the_other_locus == "NA/NA" or genotype_one_locus == "NA/NA" or (genotype_one_locus == "./." and genotype_the_other_locus == "./."):
-					print "\t\t***",samples[j], genotype_the_other_locus, cov_the_other_locus, genotype_one_locus, cov_one_locus, "what the hell"
+					print "\t\t***",samples[j], genotype_the_other_locus, cov_the_other_locus, genotype_one_locus, cov_one_locus
 					tmp_num_individual -= 1
 					proposed_genotype_at_variant_site[the_other_locus_id+':'+str(marker_pos_the_other_locus)].append("./.:0")
 				else :
@@ -550,15 +533,15 @@ def Genotypes_Investigation(variant_pairs, variants_dict, samples, loci_candidat
 				num_variant_pair_with_expected_gt_pattern_between_loci += 1
 	if len(variant_pairs) == 1 :
 		if num_variant_pair_with_expected_gt_pattern_between_loci == 1 :
-			#print "\tproposed genotype:", proposed_genotype_at_variant_site
+			print "\tproposed genotype:", proposed_genotype_at_variant_site
 			return proposed_genotype_at_variant_site
 	else :
 		if num_variant_pair_with_expected_gt_pattern_between_loci > len(variant_pairs)-num_variant_pair_with_expected_gt_pattern_between_loci :
-			#print "\tproposed genotype:", proposed_genotype_at_variant_site
+			print "\tproposed genotype:", proposed_genotype_at_variant_site
 			return proposed_genotype_at_variant_site
 
 # given an individual genotype as defined in the INFO field in the VCF file, the function spit out the genotype and coverage at the site #
-def Individual_Genotype_Analyzer(individual_genotype, ref_allele, alt_allele) :
+def analyze_individual_genotype(individual_genotype, ref_allele, alt_allele) :
 	tmp_genotype = re.split(':', individual_genotype)[0]
 	genotype = "./."
 	cov, total_cov = 0, 0
@@ -614,15 +597,16 @@ def Individual_Genotype_Analyzer(individual_genotype, ref_allele, alt_allele) :
 	return genotype, cov, type
 
 # given a marker position and a pileup file, spit out the genotype at the site #
-def Pileups_Analyzer(marker_pos, individual_out_pileups) :
+def analyze_pileups(marker_pos, individual_out_pileups) :
 	genotype = "./."
 	cov_at_marker_pos = 0
 	type = "NA"
 	num_ref_allele, num_alt_allele = 0, 0
 	fPILEUP = open(individual_out_pileups, 'r')
+	stderr.write("%s\n" %(individual_out_pileups))
 	for line in fPILEUP :
 		tmp_line = re.split('\t', line.strip())
-		if marker_pos == int(tmp_line[1]) :
+		if marker_pos == int(tmp_line[1]) and int(tmp_line[3]) > 0 :
 			pileups = tmp_line[4]
 			total_cov = float(tmp_line[3])
 			i = 0
@@ -688,8 +672,8 @@ def Pileups_Analyzer(marker_pos, individual_out_pileups) :
 	fPILEUP.close()
 	return genotype, cov_at_marker_pos, type
 
-# reverse and complementary of the given sequence #
-def RC(seq) :
+def rc(seq) :
+	""" return reversed and complemented sequence of the give sequence """
 	rc_seq = ""
 	i = len(seq) - 1
 	while i >= 0 :
@@ -706,8 +690,9 @@ def RC(seq) :
 		i -= 1
 	return rc_seq
 
-# the assembly that you'd like to identify falsely splitted loci #
-def Read_Ref_Seq(assembled_genome_file) :
+def read_assembly(assembled_genome_file) :
+	""" read the assembled genome """
+	stdout.write(timestamper() + " Reading the assembled genome %s\n" %(assembled_genome_file))
 	header, seq = "", ""
 	assembled_genome_dict = {}
 	fREF = open(assembled_genome_file, 'r')
@@ -725,33 +710,51 @@ def Read_Ref_Seq(assembled_genome_file) :
 	fREF.close()
 	return assembled_genome_dict
 
-def Main(alignment_file, assembled_genome_file, vcf_file, all_sample_bam_file, splitted_sample_bam_dir, out_dir) :
-	variants_dict, samples, smt_genotype_dict = VCF_Parser(vcf_file)
-	assembled_genome_dict = Read_Ref_Seq(assembled_genome_file)
-	split_loci_candidates, cigar_dict = Get_Splitted_loci_Candidates(alignment_file, assembled_genome_file, all_sample_bam_file, out_dir, splitted_sample_bam_dir, variants_dict, samples, smt_genotype_dict, assembled_genome_dict)
+def timestamper() :
+	""" generate a dash-separated time stamped string """
+	return datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+
+def check_files_existence(*files) :
+	""" check file existence """
+	for file in files :
+		if not exists(file) :
+			stderr.write(timestamper() + " [IO Error]: Cannot find the file you provided %s\n" %(file))
+			exit()
+
+def check_dirs_existence(*dirs) :
+	""" check input directory existence, not making any upon non-existence """
+	for dir in dirs :
+		if not exists(dir) :
+			stderr.write(timestamper() + " [IO Error]: Cannot find the input directory you provided %s\n" %(dir))
+			exit()
+
+def make_dirs_if_needed(*dirs) :
+	""" make any directories if necessary """
+	for dir in dirs :
+		if not exists(dir) :
+			makedirs(dir)
+
+def main(alignment_file, assembled_genome_file, gatk_vcf_file, smt_genotypes_file, all_sample_bam_file, splitted_sample_bam_dir, out_dir, min_aln_len, min_idn) :
+	assembled_genome_dict = read_assembly(assembled_genome_file)
+	variants_dict, samples, smt_genotype_dict = get_genotypes(gatk_vcf_file, smt_genotypes_file)
+	split_loci_candidates, cigar_dict = identify_splited_loci(alignment_file, assembled_genome_file, all_sample_bam_file, out_dir, splitted_sample_bam_dir, variants_dict, samples, smt_genotype_dict, assembled_genome_dict, min_aln_len, min_idn/100.0)
 
 if __name__ == "__main__" :
-	assembled_genome_file = sys.argv[1]
-	alignment_file = sys.argv[2]
-	vcf_file = sys.argv[3]
-	splitted_sample_bam_dir = sys.argv[4]					# directory of each sample's bam file #
-	all_sample_bam_file = sys.argv[5]						# single bam file with all the sample included #
-	out_dir = sys.argv[6]									# the base output directory under which multiple sub-directory will be created #
+	parser = ArgumentParser(description="Identify alleles/loci that are erroneously split by assemblers")
+	parser.add_argument("-assembly", metavar="FILE", dest="assembled_genome_file", required=True, help="Specify assembled genome in fasta")
+	parser.add_argument("-aln", metavar="FILE", dest="alignment_file", required=True, help="Specify the file with alignment results of aligning assembled genome against itself. Note: lastz alignment results in CIGAR format is supported only in current version")
+	parser.add_argument("-gatk_vcf", metavar="FILE", dest="gatk_vcf_file", required=True, help="Specify the VCF file with genotypes of the mapping population obtained from GATK")
+	parser.add_argument("-bam_file", metavar="FILE", dest="all_sample_bam_file", required=True, help="Specify the BAM file of individuals of the entire mapping population")
+	parser.add_argument("-bam_dir", metavar="DIR", dest="splitted_sample_bam_dir", required=True, help="Specify the directory with individual BAM files (not merged as a single BAM file like what -bam_file requires)")
+	parser.add_argument("-smt_vcf", metavar="FILE", dest="smt_genotypes_file", required=True, help="Specify the VCF file with genotypes of the mapping population obtained from SAMtools")
+	parser.add_argument("-out_dir", metavar="DIR", dest="out_dir", required=True, help="Specifying the output directory under which multiple subfolders will be created")
+	parser.add_argument("-min_len", metavar="INT", dest="min_aln_len", type=int, default=1000, help="Specify the minimum alignment length of a pair of loci/alleles to be considered. DEFAULT: 1000")
+	parser.add_argument("-min_idn", metavar="INT", dest="min_idn", type=int, default=90, help="Specify the minimum alignment identity (e.g. 90 mean 90%% identity) of a pair of loci/alleles to be considered. DEFAULT: 90")
 
-	###############################
-	# check the file availability #
-	###############################
-	if not os.path.exists(alignment_file) :
-		print "Error: cannot find your alignment file %s, please check your path" %(alignment_file)
-		sys.exit(1)
-	if not os.path.exists(assembled_genome_file) :
-		print "Error: cannot find your assembly sequence file, please check your path" %(assembled_genome_file)
-		sys.exit(1)
-	if not os.path.exists(vcf_file) :
-		print "Error: cannot find  your genotypes file (vcf), please check your path" %(vcf_file)
-		sys.exit(1)
-	if not os.path.exists(splitted_sample_bam_dir) :
-		print "Error: cannot find your directory %s with each sample's bam file" %(splitted_sample_bam_dir)
-		sys.exit(1)
+	args = parser.parse_args()
 
-	Main(alignment_file, assembled_genome_file, vcf_file, all_sample_bam_file, splitted_sample_bam_dir, out_dir)
+	check_files_existence(args.alignment_file, args.assembled_genome_file, args.gatk_vcf_file, args.smt_genotypes_file)
+	check_dirs_existence(args.splitted_sample_bam_dir)
+	make_dirs_if_needed(args.out_dir)
+
+	main(args.alignment_file, args.assembled_genome_file, args.gatk_vcf_file, args.smt_genotypes_file, args.all_sample_bam_file, args.splitted_sample_bam_dir, args.out_dir, args.min_aln_len, args.min_idn)
