@@ -62,7 +62,6 @@ def call_bwa(bwa_cmd, out = None, err = None) :
 	else :
 		proc = Popen(shlex.split(bwa_cmd), stderr=file(err, 'w'), stdout=file(out, 'w'), shell=False)
 	proc_stderr = proc.communicate()[1]
-	exit()
 	if proc.returncode != 0 :
 		stderr.write(timestamper() + " [BWA Error] something wrong when running %s\n" %(bwa_cmd))
 		stderr.write(timestamper() + " [BWA Error] %s\n" %(proc_stderr))
